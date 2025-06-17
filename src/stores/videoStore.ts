@@ -35,6 +35,7 @@ interface VideoStore {
   } | null;
   
   // Actions
+  addVideo: (video: Video) => void;
   addClip: (clip: VideoClip) => void;
   removeClip: (id: string) => void;
   setCurrentClip: (id: string | null) => void;
@@ -64,6 +65,22 @@ export const useVideoStore = create<VideoStore>((set) => ({
   isLoading: false,
   isProcessing: false,
   processingProgress: null,
+  
+  // Video actions
+  addVideo: (video) => set((state) => {
+    const newClip: VideoClip = {
+      id: video.id,
+      url: video.url,
+      duration: video.duration,
+      name: `Video ${state.clips.length + 1}`,
+      file: new File([], `video-${video.id}`) // Placeholder file object
+    };
+    return {
+      clips: [...state.clips, newClip],
+      currentClip: video.id,
+      error: null
+    };
+  }),
   
   // Clip actions
   addClip: (clip) => set((state) => ({

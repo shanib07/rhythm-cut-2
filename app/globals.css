@@ -19,9 +19,6 @@
   --text-primary: #171717;
   --text-secondary: #4B5563;
   --background-light: #F9FAFB;
-}
-
-@theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
