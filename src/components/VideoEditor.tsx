@@ -442,14 +442,14 @@ export const VideoEditor: React.FC = () => {
                 <div className="flex items-center gap-4">
                   <button
                     onClick={togglePlay}
-                    className="p-2 rounded-full bg-white/90 hover:bg-white"
+                    className="p-2 rounded-full bg-primary/90 hover:bg-primary text-white"
                   >
                     {isPlaying ? <Pause size={20} /> : <Play size={20} />}
                   </button>
                   <div className="flex-1">
                     <div className="h-1 bg-white/30 rounded-full">
                       <div
-                        className="h-full bg-white rounded-full"
+                        className="h-full bg-accent rounded-full"
                         style={{ width: `${(currentTime / (sortedBeats[sortedBeats.length - 1]?.time || 1)) * 100}%` }}
                       />
                     </div>
@@ -464,19 +464,19 @@ export const VideoEditor: React.FC = () => {
             <div
               {...getRootProps()}
               className={`border-2 border-dashed rounded-lg p-8 text-center transition-colors
-                ${isDragActive ? 'border-blue-500 bg-blue-50' : 'border-gray-300 hover:border-blue-400'}`}
+                ${isDragActive ? 'border-primary bg-secondary/20' : 'border-accent hover:border-primary'}`}
             >
               <input {...getInputProps()} />
               <div className="flex flex-col items-center gap-2">
                 {isLoading ? (
                   <>
-                    <Loader2 className="w-12 h-12 text-gray-400 animate-spin" />
+                    <Loader2 className="w-12 h-12 text-primary animate-spin" />
                     <p className="text-gray-600">Loading videos...</p>
                   </>
                 ) : (
                   <>
-                    <Video className="w-12 h-12 text-gray-400" />
-                    <p className="text-gray-600">
+                    <Video className="w-12 h-12 text-primary" />
+                    <p className="text-gray-700">
                       {isDragActive
                         ? 'Drop the videos here...'
                         : 'Drag & drop videos, or click to select'}
@@ -496,8 +496,8 @@ export const VideoEditor: React.FC = () => {
             disabled={isExporting || !clips.length || !beats.length}
             className={`w-full flex items-center justify-center gap-2 px-4 py-3 rounded-lg
               ${isExporting || !clips.length || !beats.length
-                ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
-                : 'bg-green-500 text-white hover:bg-green-600'
+                ? 'bg-gray-200 text-gray-500 cursor-not-allowed'
+                : 'bg-primary text-white hover:bg-button-hover'
               }`}
           >
             {isExporting ? (
@@ -516,23 +516,23 @@ export const VideoEditor: React.FC = () => {
           {/* Upload more videos button */}
           <div
             {...getRootProps()}
-            className="bg-blue-50 border-2 border-dashed border-blue-200 rounded-lg p-4 text-center cursor-pointer hover:bg-blue-100 transition-colors"
+            className="bg-secondary/20 border-2 border-dashed border-accent rounded-lg p-4 text-center cursor-pointer hover:bg-secondary/30 transition-colors"
           >
             <input {...getInputProps()} />
-            <Upload className="w-6 h-6 text-blue-500 mx-auto mb-2" />
-            <p className="text-blue-600 text-sm">Upload more videos</p>
+            <Upload className="w-6 h-6 text-primary mx-auto mb-2" />
+            <p className="text-primary text-sm">Upload more videos</p>
           </div>
 
           {/* Clips list */}
           <div className="bg-white rounded-lg shadow p-4">
-            <h3 className="font-semibold mb-3">Video Clips</h3>
+            <h3 className="font-semibold mb-3 text-gray-800 text-lg">Video Clips</h3>
             <div className="space-y-2">
               {clips?.map((clip, index) => (
                 <div
                   key={clip.id}
                   onClick={() => setCurrentClip(clip.id)}
                   className={`flex items-center gap-2 p-2 rounded cursor-pointer
-                    ${clip.id === currentClip ? 'bg-blue-50 text-blue-600' : 'hover:bg-gray-50'}`}
+                    ${clip.id === currentClip ? 'bg-primary/10 text-primary' : 'hover:bg-secondary/10 text-gray-700'}`}
                 >
                   <Video size={16} />
                   <span className="flex-1 truncate">
@@ -543,7 +543,7 @@ export const VideoEditor: React.FC = () => {
                       e.stopPropagation();
                       removeClip(clip.id);
                     }}
-                    className="p-1 hover:bg-gray-200 rounded"
+                    className="p-1 hover:bg-secondary/20 rounded text-gray-600 hover:text-gray-800"
                   >
                     <Trash2 size={14} />
                   </button>
@@ -554,7 +554,7 @@ export const VideoEditor: React.FC = () => {
 
           {/* Beat markers */}
           <div className="bg-white rounded-lg shadow p-4">
-            <h3 className="font-semibold mb-3">Beat Markers (in seconds)</h3>
+            <h3 className="font-semibold mb-3 text-gray-800 text-lg">Beat Markers (in seconds)</h3>
             <div className="flex gap-2 mb-4">
               <input
                 type="number"
@@ -563,11 +563,11 @@ export const VideoEditor: React.FC = () => {
                 placeholder="Time in seconds (e.g., 1.5)"
                 step="0.1"
                 min="0"
-                className="flex-1 px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="flex-1 px-3 py-2 border border-border-color rounded-lg focus:outline-none focus:ring-2 focus:ring-primary text-gray-700 placeholder-gray-600"
               />
               <button
                 onClick={handleAddBeat}
-                className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600"
+                className="px-4 py-2 bg-primary text-white rounded-lg hover:bg-button-hover"
               >
                 Add Beat
               </button>
@@ -576,15 +576,15 @@ export const VideoEditor: React.FC = () => {
               {beats?.map((beat, index) => (
                 <div
                   key={beat.id}
-                  className="flex items-center justify-between p-2 bg-gray-50 rounded"
+                  className="flex items-center justify-between p-2 bg-secondary/10 rounded"
                 >
-                  <div className="flex items-center gap-2">
-                    <Clock size={16} />
+                  <div className="flex items-center gap-2 text-gray-700">
+                    <Clock size={16} className="text-primary" />
                     <span>{beat.time.toFixed(2)}s</span>
                   </div>
                   <button
                     onClick={() => removeBeat(beat.id)}
-                    className="p-1 hover:bg-gray-200 rounded"
+                    className="p-1 hover:bg-secondary/20 rounded text-gray-600 hover:text-gray-800"
                   >
                     <Trash2 size={14} />
                   </button>
@@ -595,14 +595,14 @@ export const VideoEditor: React.FC = () => {
 
           {/* Debug info */}
           <div className="bg-white rounded-lg shadow p-4">
-            <h3 className="font-semibold mb-3">Current Segment Info</h3>
+            <h3 className="font-semibold mb-3 text-gray-800 text-lg">Current Segment Info</h3>
             <div className="text-sm space-y-1">
               {videoSegments.map((segment, index) => segment && (
-                <div key={index} className={`p-2 rounded ${index === currentVideoIndex ? 'bg-blue-50' : 'bg-gray-50'}`}>
-                  <div>Video {index + 1}</div>
-                  <div>Start: {segment.startTime}s</div>
-                  <div>End: {segment.endTime}s</div>
-                  <div>Duration: {(segment.endTime - segment.startTime).toFixed(2)}s</div>
+                <div key={index} className={`p-2 rounded ${index === currentVideoIndex ? 'bg-primary/10' : 'bg-secondary/10'}`}>
+                  <div className="text-gray-700 font-medium">Video {index + 1}</div>
+                  <div className="text-gray-700">Start: {segment.startTime}s</div>
+                  <div className="text-gray-700">End: {segment.endTime}s</div>
+                  <div className="text-gray-700">Duration: {(segment.endTime - segment.startTime).toFixed(2)}s</div>
                 </div>
               ))}
             </div>
@@ -612,16 +612,16 @@ export const VideoEditor: React.FC = () => {
 
       {/* Timeline */}
       <div className="bg-white rounded-lg shadow p-4">
-        <h3 className="font-semibold mb-4">Timeline</h3>
-        <div className="relative h-32 bg-gray-50 rounded border border-gray-200">
+        <h3 className="font-semibold mb-4 text-gray-800 text-lg">Timeline</h3>
+        <div className="relative h-32 bg-secondary/5 rounded border border-border-color">
           {/* Beat markers */}
           {sortedBeats?.map((beat, index) => (
             <div
               key={beat.id}
-              className="absolute top-0 bottom-0 w-px bg-gray-300"
+              className="absolute top-0 bottom-0 w-px bg-accent"
               style={{ left: `${(beat.time / Math.max(...sortedBeats.map(b => b.time), 1)) * 100}%` }}
             >
-              <div className="absolute top-0 -translate-x-1/2 px-1 py-0.5 text-xs bg-gray-100 rounded">
+              <div className="absolute top-0 -translate-x-1/2 px-1 py-0.5 text-xs bg-white rounded text-gray-700 border border-gray-200">
                 {index === 0 ? '0:00' : beat.time.toFixed(2)}s
               </div>
             </div>
@@ -641,12 +641,12 @@ export const VideoEditor: React.FC = () => {
                 key={segment.id}
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="absolute h-16 top-8 bg-blue-100 rounded cursor-pointer hover:bg-blue-200"
+                className="absolute h-16 top-8 bg-primary/20 rounded cursor-pointer hover:bg-primary/30"
                 style={{ left: `${left}%`, width: `${width}%` }}
                 onClick={() => removeTimelineSegment(segment.id)}
               >
                 <div className="absolute inset-0 flex items-center justify-center">
-                  <span className="text-xs text-blue-600 truncate px-2">
+                  <span className="text-xs text-gray-700 font-medium truncate px-2">
                     Video {index + 1}: {clip.name}
                   </span>
                 </div>

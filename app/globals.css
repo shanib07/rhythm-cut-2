@@ -3,6 +3,22 @@
 :root {
   --background: #ffffff;
   --foreground: #171717;
+  
+  /* Theme Colors */
+  --primary: #03A6A1;
+  --secondary: #FFE3BB;
+  --accent: #FFA673;
+  --highlight: #FF4F0F;
+  
+  /* Semantic Colors */
+  --button-primary: var(--primary);
+  --button-hover: #02908C;
+  --button-text: #ffffff;
+  --border-color: #E5E7EB;
+  --card-bg: #ffffff;
+  --text-primary: #171717;
+  --text-secondary: #4B5563;
+  --background-light: #F9FAFB;
 }
 
 @theme inline {
@@ -16,11 +32,36 @@
   :root {
     --background: #0a0a0a;
     --foreground: #ededed;
+    --card-bg: #1F2937;
+    --text-primary: #F9FAFB;
+    --text-secondary: #D1D5DB;
+    --border-color: #374151;
   }
 }
 
 body {
-  background: var(--background);
+  background: var(--background-light);
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* Theme Utility Classes */
+.bg-primary { background-color: var(--primary); }
+.bg-secondary { background-color: var(--secondary); }
+.bg-accent { background-color: var(--accent); }
+.bg-highlight { background-color: var(--highlight); }
+
+.text-primary { color: var(--primary); }
+.text-secondary { color: var(--secondary); }
+.text-accent { color: var(--accent); }
+.text-highlight { color: var(--highlight); }
+
+.border-primary { border-color: var(--primary); }
+.border-secondary { border-color: var(--secondary); }
+.border-accent { border-color: var(--accent); }
+.border-highlight { border-color: var(--highlight); }
+
+.hover\:bg-primary:hover { background-color: var(--primary); }
+.hover\:bg-secondary:hover { background-color: var(--secondary); }
+.hover\:bg-accent:hover { background-color: var(--accent); }
+.hover\:bg-highlight:hover { background-color: var(--highlight); }
