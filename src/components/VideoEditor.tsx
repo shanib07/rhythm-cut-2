@@ -281,6 +281,10 @@ export const VideoEditor: React.FC = () => {
         throw new Error('Canvas not available');
       }
 
+      // Create an audio context
+      const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const audioDestination = audioContext.createMediaStreamDestination();
+      
       // Set canvas size to match the first video's dimensions
       const firstClip = clips[0];
       const video = document.createElement('video');
@@ -293,27 +297,33 @@ export const VideoEditor: React.FC = () => {
         };
       });
 
-      // Create MediaRecorder with high quality settings
-      const stream = canvas.captureStream(60); // Increase to 60 FPS
-      
-      // Try different codecs in order of preference
+      // Create a combined video+audio stream
+      const canvasStream = canvas.captureStream(60);
+      const combinedStream = new MediaStream([
+        ...canvasStream.getVideoTracks(),
+        ...audioDestination.stream.getAudioTracks()
+      ]);
+
+      // Try to use MP4 with H.264, fallback to other formats if not supported
       const mimeTypes = [
-        'video/mp4;codecs=h264',
-        'video/webm;codecs=h264',
-        'video/webm;codecs=vp9',
+        'video/mp4;codecs=h264,aac',
+        'video/mp4;codecs=h264,mp3',
+        'video/mp4',
+        'video/webm;codecs=h264,opus',
+        'video/webm;codecs=vp9,opus',
         'video/webm'
       ];
-      
+
       let selectedMimeType = mimeTypes.find(type => MediaRecorder.isTypeSupported(type));
       if (!selectedMimeType) {
         throw new Error('No supported video codec found');
       }
 
-      const mediaRecorder = new MediaRecorder(stream, {
+      const mediaRecorder = new MediaRecorder(combinedStream, {
         mimeType: selectedMimeType,
-        videoBitsPerSecond: 8000000 // 8 Mbps for better quality
+        videoBitsPerSecond: 8000000 // 8 Mbps
       });
-      
+
       mediaRecorderRef.current = mediaRecorder;
       recordedChunksRef.current = [];
 
@@ -326,44 +336,18 @@ export const VideoEditor: React.FC = () => {
       mediaRecorder.onstop = async () => {
         const chunks = recordedChunksRef.current;
         const blob = new Blob(chunks, { type: selectedMimeType });
-
-        // If we're using MP4, we need to process it first
-        if (selectedMimeType.includes('mp4')) {
-          try {
-            // Convert to MP4 using MediaRecorder's data
-            const arrayBuffer = await blob.arrayBuffer();
-            const file = new File([arrayBuffer], 'temp.mp4', { type: 'video/mp4' });
-            
-            // Create download link
-            const url = URL.createObjectURL(file);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = 'edited-video.mp4';
-            a.click();
-            URL.revokeObjectURL(url);
-          } catch (error) {
-            console.error('Error processing MP4:', error);
-            // Fallback to WebM if MP4 processing fails
-            const webmBlob = new Blob(chunks, { type: 'video/webm' });
-            const url = URL.createObjectURL(webmBlob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = 'edited-video.webm';
-            a.click();
-            URL.revokeObjectURL(url);
-          }
-        } else {
-          // WebM format
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement('a');
-          a.href = url;
-          a.download = 'edited-video.webm';
-          a.click();
-          URL.revokeObjectURL(url);
-        }
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'edited-video.mp4';
+        a.click();
+        URL.revokeObjectURL(url);
+        
+        // Clean up audio context
+        await audioContext.close();
         
         setIsExporting(false);
-        toast.success('Video export completed!');
+        toast.success('Video export completed with audio!');
       };
 
       // Start recording with smaller timeslice for more frequent ondataavailable events
@@ -381,6 +365,10 @@ export const VideoEditor: React.FC = () => {
         
         await new Promise<void>((resolve) => {
           video.onloadeddata = async () => {
+            // Set up audio processing for this segment
+            const audioSource = audioContext.createMediaElementSource(video);
+            audioSource.connect(audioDestination);
+            
             video.currentTime = segment.videoStartTime;
             
             const segmentDuration = segment.endTime - segment.startTime;
@@ -390,6 +378,8 @@ export const VideoEditor: React.FC = () => {
             const processFrame = async () => {
               const elapsed = (performance.now() - startTime) / 1000;
               if (elapsed >= segmentDuration) {
+                // Disconnect audio source when segment is done
+                audioSource.disconnect();
                 resolve();
                 return;
               }
@@ -410,7 +400,8 @@ export const VideoEditor: React.FC = () => {
               setTimeout(() => requestAnimationFrame(processFrame), frameInterval);
             };
 
-            video.play();
+            // Start video playback for audio
+            await video.play();
             processFrame();
           };
         });
