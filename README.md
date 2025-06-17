@@ -1,4 +1,55 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Rhythm Cut
+
+A video editing tool that lets you cut and combine videos based on beat markers. Perfect for creating rhythm-based video edits.
+
+## Features
+
+- Upload multiple videos
+- Set beat markers in seconds
+- Automatic video switching at beat markers
+- Real-time preview
+- Export final video
+
+## How to Use
+
+1. Upload Videos:
+   - Upload your videos in the order you want them to play
+   - Each video will be assigned a number (Video 1, Video 2, etc.)
+
+2. Add Beat Markers:
+   - Enter times in seconds (e.g., "1" for 1 second)
+   - Click "Add Beat" to add the marker
+   - Videos will switch at these exact times
+
+3. Preview:
+   - Use the play/pause button to preview your edit
+   - The progress bar shows overall timeline progress
+   - Current time is displayed in seconds
+
+4. Export:
+   - Click "Export Video" to save your edit
+   - The final video will be downloaded as a WebM file
+
+## Development
+
+```bash
+# Install dependencies
+npm install
+
+# Run development server
+npm run dev
+
+# Build for production
+npm run build
+```
+
+## Technologies Used
+
+- Next.js
+- React
+- TypeScript
+- Tailwind CSS
+- Web APIs (MediaRecorder, Canvas)
 
 ## Getting Started
 

@@ -83,7 +83,7 @@ export const useVideoStore = create<VideoStore>((set) => ({
   
   // Beat actions
   addBeat: (beat) => set((state) => ({
-    beats: [...state.beats].sort((a, b) => a.time - b.time)
+    beats: [...state.beats, beat].sort((a, b) => a.time - b.time)
   })),
   
   removeBeat: (id) => set((state) => ({
