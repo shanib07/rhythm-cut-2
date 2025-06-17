@@ -293,12 +293,27 @@ export const VideoEditor: React.FC = () => {
         };
       });
 
-      // Create MediaRecorder
-      const stream = canvas.captureStream(30); // 30 FPS
+      // Create MediaRecorder with high quality settings
+      const stream = canvas.captureStream(60); // Increase to 60 FPS
+      
+      // Try different codecs in order of preference
+      const mimeTypes = [
+        'video/mp4;codecs=h264',
+        'video/webm;codecs=h264',
+        'video/webm;codecs=vp9',
+        'video/webm'
+      ];
+      
+      let selectedMimeType = mimeTypes.find(type => MediaRecorder.isTypeSupported(type));
+      if (!selectedMimeType) {
+        throw new Error('No supported video codec found');
+      }
+
       const mediaRecorder = new MediaRecorder(stream, {
-        mimeType: 'video/webm;codecs=vp9',
-        videoBitsPerSecond: 5000000 // 5 Mbps
+        mimeType: selectedMimeType,
+        videoBitsPerSecond: 8000000 // 8 Mbps for better quality
       });
+      
       mediaRecorderRef.current = mediaRecorder;
       recordedChunksRef.current = [];
 
@@ -308,24 +323,53 @@ export const VideoEditor: React.FC = () => {
         }
       };
 
-      mediaRecorder.onstop = () => {
-        const blob = new Blob(recordedChunksRef.current, {
-          type: 'video/webm'
-        });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = 'edited-video.webm';
-        a.click();
-        URL.revokeObjectURL(url);
+      mediaRecorder.onstop = async () => {
+        const chunks = recordedChunksRef.current;
+        const blob = new Blob(chunks, { type: selectedMimeType });
+
+        // If we're using MP4, we need to process it first
+        if (selectedMimeType.includes('mp4')) {
+          try {
+            // Convert to MP4 using MediaRecorder's data
+            const arrayBuffer = await blob.arrayBuffer();
+            const file = new File([arrayBuffer], 'temp.mp4', { type: 'video/mp4' });
+            
+            // Create download link
+            const url = URL.createObjectURL(file);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'edited-video.mp4';
+            a.click();
+            URL.revokeObjectURL(url);
+          } catch (error) {
+            console.error('Error processing MP4:', error);
+            // Fallback to WebM if MP4 processing fails
+            const webmBlob = new Blob(chunks, { type: 'video/webm' });
+            const url = URL.createObjectURL(webmBlob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'edited-video.webm';
+            a.click();
+            URL.revokeObjectURL(url);
+          }
+        } else {
+          // WebM format
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = 'edited-video.webm';
+          a.click();
+          URL.revokeObjectURL(url);
+        }
+        
         setIsExporting(false);
         toast.success('Video export completed!');
       };
 
-      // Start recording
-      mediaRecorder.start();
+      // Start recording with smaller timeslice for more frequent ondataavailable events
+      mediaRecorder.start(1000);
 
-      // Process each segment in sequence
+      // Process each segment with precise timing
       for (const segment of videoSegments) {
         if (!segment) continue;
 
@@ -340,10 +384,11 @@ export const VideoEditor: React.FC = () => {
             video.currentTime = segment.videoStartTime;
             
             const segmentDuration = segment.endTime - segment.startTime;
-            const startTime = Date.now();
+            const startTime = performance.now();
+            const frameInterval = 1000 / 60; // 60 FPS
             
             const processFrame = async () => {
-              const elapsed = (Date.now() - startTime) / 1000;
+              const elapsed = (performance.now() - startTime) / 1000;
               if (elapsed >= segmentDuration) {
                 resolve();
                 return;
@@ -353,16 +398,25 @@ export const VideoEditor: React.FC = () => {
               const videoTime = segment.videoStartTime + elapsed;
               if (videoTime <= segment.videoEndTime) {
                 video.currentTime = videoTime;
+                
+                // Clear canvas before drawing new frame
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                
+                // Draw video frame
                 ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
               }
 
-              requestAnimationFrame(processFrame);
+              // Schedule next frame with precise timing
+              setTimeout(() => requestAnimationFrame(processFrame), frameInterval);
             };
 
             video.play();
             processFrame();
           };
         });
+
+        // Small pause between segments to ensure clean transitions
+        await new Promise(resolve => setTimeout(resolve, 50));
       }
 
       // Stop recording after all segments are processed
