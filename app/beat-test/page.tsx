@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Music, Play, Pause, AlertCircle, Volume2, Activity, Clock, Timer, ZoomIn, ZoomOut, RefreshCw, Sliders, Download, ClipboardCopy, ChevronDown, ChevronUp, FileAudio } from 'lucide-react';
+import { Music, Play, Pause, AlertCircle, Volume2, Activity, Clock, Timer, ZoomIn, ZoomOut, RefreshCw, Sliders, Download, ClipboardCopy, ChevronDown, ChevronUp, FileAudio, List } from 'lucide-react';
 import { AudioAnalyzer } from '@/src/services/AudioAnalyzer';
 import { WaveformVisualizer } from '@/src/components/WaveformVisualizer';
 
@@ -59,6 +59,8 @@ export default function BeatTestPage() {
     size: number;
   } | null>(null);
   const [algorithm, setAlgorithm] = useState<'onset' | 'energy' | 'valley'>('onset');
+  const [showTimestamps, setShowTimestamps] = useState<boolean>(true);
+  const [timestampFormat, setTimestampFormat] = useState<'seconds' | 'time'>('seconds');
   
   const analyzerRef = useRef<AudioAnalyzer | null>(null);
   const animationFrameRef = useRef<number | null>(null);
@@ -293,6 +295,10 @@ export default function BeatTestPage() {
     return `${mins}:${secs.toString().padStart(2, '0')}.${ms.toString().padStart(3, '0')}`;
   };
 
+  const formatTimestampSeconds = (seconds: number): string => {
+    return seconds.toFixed(3);
+  };
+
   const handleSensitivityChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = parseFloat(e.target.value);
     setSensitivity(value);
@@ -387,6 +393,20 @@ export default function BeatTestPage() {
     try {
       await navigator.clipboard.writeText(JSON.stringify(analysisResults.beats, null, 2));
       setCopySuccess('Copied!');
+      setTimeout(() => setCopySuccess(''), 2000);
+    } catch (err) {
+      setCopySuccess('Failed to copy');
+      console.error('Failed to copy:', err);
+    }
+  };
+
+  const handleCopyTimestamps = async () => {
+    if (!beats || beats.length === 0) return;
+
+    try {
+      const timestamps = beats.map(beat => beat.timestamp.toFixed(3)).join('\n');
+      await navigator.clipboard.writeText(timestamps);
+      setCopySuccess('Timestamps copied!');
       setTimeout(() => setCopySuccess(''), 2000);
     } catch (err) {
       setCopySuccess('Failed to copy');
@@ -655,6 +675,121 @@ export default function BeatTestPage() {
                     {copySuccess && (
                       <p className="text-green-500 text-sm">{copySuccess}</p>
                     )}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Beat Timestamps Display Section */}
+            {beats.length > 0 && (
+              <div className="bg-card-bg p-6 rounded-lg shadow-lg border border-border-color">
+                <div className="flex items-center justify-between mb-4">
+                  <h2 className="text-xl font-semibold text-primary flex items-center gap-2">
+                    <List className="w-5 h-5" />
+                    Beat Timestamps ({beats.length} beats)
+                  </h2>
+                  <div className="flex items-center gap-3">
+                    <select
+                      value={timestampFormat}
+                      onChange={(e) => setTimestampFormat(e.target.value as 'seconds' | 'time')}
+                      className="px-3 py-1 bg-white border border-border-color rounded-md text-sm text-primary"
+                    >
+                      <option value="seconds">Seconds</option>
+                      <option value="time">Time Format</option>
+                    </select>
+                    <button
+                      onClick={handleCopyTimestamps}
+                      className="flex items-center gap-2 px-3 py-1 border border-border-color text-primary rounded-md hover:bg-gray-100 transition-colors text-sm"
+                    >
+                      <ClipboardCopy className="w-4 h-4" />
+                      Copy List
+                    </button>
+                    <button
+                      onClick={() => setShowTimestamps(!showTimestamps)}
+                      className="p-1 text-primary"
+                    >
+                      {showTimestamps ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
+                    </button>
+                  </div>
+                </div>
+
+                {showTimestamps && (
+                  <div className="space-y-2">
+                    {/* Summary */}
+                    <div className="bg-gray-100 rounded-lg p-3 mb-3">
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-sm">
+                        <div>
+                          <span className="text-secondary">First Beat:</span>
+                          <span className="text-primary font-mono ml-2">
+                            {timestampFormat === 'seconds' 
+                              ? formatTimestampSeconds(beats[0].timestamp) + 's'
+                              : formatTimestamp(beats[0].timestamp)
+                            }
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-secondary">Last Beat:</span>
+                          <span className="text-primary font-mono ml-2">
+                            {timestampFormat === 'seconds' 
+                              ? formatTimestampSeconds(beats[beats.length - 1].timestamp) + 's'
+                              : formatTimestamp(beats[beats.length - 1].timestamp)
+                            }
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-secondary">Duration:</span>
+                          <span className="text-primary font-mono ml-2">
+                            {(beats[beats.length - 1].timestamp - beats[0].timestamp).toFixed(3)}s
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-secondary">Avg Gap:</span>
+                          <span className="text-primary font-mono ml-2">
+                            {beats.length > 1 
+                              ? ((beats[beats.length - 1].timestamp - beats[0].timestamp) / (beats.length - 1)).toFixed(3) + 's'
+                              : 'N/A'
+                            }
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Timestamps List */}
+                    <div className="bg-gray-50 rounded-lg p-4 max-h-96 overflow-y-auto">
+                      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2">
+                        {beats.map((beat, index) => {
+                          const isCurrentBeat = isPlaying && Math.abs(currentTime - beat.timestamp) < 0.1;
+                          return (
+                            <div 
+                              key={index} 
+                              className={`flex items-center justify-between rounded px-3 py-2 transition-all ${
+                                isCurrentBeat 
+                                  ? 'bg-primary text-white' 
+                                  : 'bg-white border border-gray-200 hover:border-primary'
+                              }`}
+                            >
+                              <span className={`text-sm ${isCurrentBeat ? 'text-white' : 'text-gray-600'}`}>
+                                #{index + 1}
+                              </span>
+                              <span className={`font-mono text-sm ${isCurrentBeat ? 'text-white' : 'text-primary'}`}>
+                                {timestampFormat === 'seconds' 
+                                  ? formatTimestampSeconds(beat.timestamp) + 's'
+                                  : formatTimestamp(beat.timestamp)
+                                }
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* Export as Array */}
+                    <div className="mt-3 p-3 bg-gray-800 rounded-lg">
+                      <p className="text-gray-400 text-xs mb-2">Array format (copy-paste ready):</p>
+                      <code className="text-green-400 text-xs font-mono">
+                        [{beats.map(b => b.timestamp.toFixed(3)).join(', ')}]
+                      </code>
+                    </div>
                   </div>
                 )}
               </div>

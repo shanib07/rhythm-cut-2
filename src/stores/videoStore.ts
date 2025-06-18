@@ -25,6 +25,11 @@ interface VideoStore {
   timeline: TimelineSegment[];
   currentClip: string | null;
   
+  // Audio management
+  audioFile: File | null;
+  audioUrl: string | null;
+  audioBuffer: AudioBuffer | null;
+  
   // UI state
   error: string | null;
   isLoading: boolean;
@@ -47,6 +52,11 @@ interface VideoStore {
   addTimelineSegment: (segment: TimelineSegment) => void;
   removeTimelineSegment: (id: string) => void;
   
+  // Audio actions
+  setAudioFile: (file: File | null) => void;
+  setAudioUrl: (url: string | null) => void;
+  setAudioBuffer: (buffer: AudioBuffer | null) => void;
+  
   setError: (error: string | null) => void;
   setLoading: (isLoading: boolean) => void;
   setProcessing: (isProcessing: boolean) => void;
@@ -59,6 +69,11 @@ export const useVideoStore = create<VideoStore>((set) => ({
   beats: [],
   timeline: [],
   currentClip: null,
+  
+  // Audio state
+  audioFile: null,
+  audioUrl: null,
+  audioBuffer: null,
   
   // UI state
   error: null,
@@ -125,6 +140,11 @@ export const useVideoStore = create<VideoStore>((set) => ({
   removeTimelineSegment: (id) => set((state) => ({
     timeline: state.timeline.filter(t => t.id !== id)
   })),
+  
+  // Audio actions
+  setAudioFile: (file) => set({ audioFile: file }),
+  setAudioUrl: (url) => set({ audioUrl: url }),
+  setAudioBuffer: (buffer) => set({ audioBuffer: buffer }),
   
   // UI actions
   setError: (error) => set({ error }),

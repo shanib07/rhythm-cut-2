@@ -14,6 +14,8 @@ export const VideoEditor: React.FC = () => {
     timeline = [],
     currentClip,
     isLoading,
+    audioUrl,
+    audioBuffer,
     addClip,
     removeClip,
     addBeat,
@@ -28,6 +30,7 @@ export const VideoEditor: React.FC = () => {
   const [currentTime, setCurrentTime] = useState(0);
   const [newBeatTime, setNewBeatTime] = useState('');
   const videoRef = useRef<HTMLVideoElement>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
   const [currentVideoIndex, setCurrentVideoIndex] = useState(0);
   const [isTransitioning, setIsTransitioning] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
@@ -63,6 +66,24 @@ export const VideoEditor: React.FC = () => {
     }).filter(Boolean);
   }, [clips, sortedBeats]);
 
+  // Initialize audio element
+  useEffect(() => {
+    if (!audioRef.current && audioUrl) {
+      audioRef.current = new Audio(audioUrl);
+      audioRef.current.addEventListener('timeupdate', handleAudioTimeUpdate);
+      audioRef.current.addEventListener('ended', handleAudioEnded);
+    }
+
+    return () => {
+      if (audioRef.current) {
+        audioRef.current.removeEventListener('timeupdate', handleAudioTimeUpdate);
+        audioRef.current.removeEventListener('ended', handleAudioEnded);
+        audioRef.current.pause();
+        audioRef.current = null;
+      }
+    };
+  }, [audioUrl]);
+
   // Handle video playback
   useEffect(() => {
     const video = videoRef.current;
@@ -70,21 +91,22 @@ export const VideoEditor: React.FC = () => {
 
     if (isPlaying) {
       video.play().catch(console.error);
+      // Mute video to only play the audio track
+      video.muted = true;
     } else {
       video.pause();
     }
   }, [isPlaying, currentVideoIndex]);
 
-  // Handle video switching based on current time
-  useEffect(() => {
-    if (!isPlaying || clips.length === 0 || sortedBeats.length === 0) return;
+  // Handle audio time update
+  const handleAudioTimeUpdate = () => {
+    if (audioRef.current) {
+      const newTime = audioRef.current.currentTime;
+      setCurrentTime(newTime);
 
-    const checkAndSwitchVideo = () => {
-      if (!videoRef.current) return;
-
-      // Find the current segment
+      // Find and switch to the appropriate video segment based on audio time
       const currentSegment = videoSegments.find(segment => 
-        segment && currentTime >= segment.startTime && currentTime < segment.endTime
+        segment && newTime >= segment.startTime && newTime < segment.endTime
       );
 
       if (currentSegment) {
@@ -96,77 +118,50 @@ export const VideoEditor: React.FC = () => {
           
           // Set the correct time within the video
           if (videoRef.current) {
-            const relativeTime = currentTime - currentSegment.startTime;
+            const relativeTime = newTime - currentSegment.startTime;
             videoRef.current.currentTime = relativeTime;
           }
         }
       }
-    };
-
-    const timer = setInterval(checkAndSwitchVideo, 50);
-    return () => clearInterval(timer);
-  }, [currentTime, isPlaying, clips, videoSegments, currentVideoIndex, setCurrentClip]);
-
-  // Handle video time update
-  const handleTimeUpdate = (e: React.SyntheticEvent<HTMLVideoElement>) => {
-    const video = e.currentTarget;
-    const currentSegment = videoSegments[currentVideoIndex];
-    
-    if (currentSegment) {
-      const relativeTime = video.currentTime;
-      const absoluteTime = currentSegment.startTime + relativeTime;
-      
-      // If we've reached the end of this segment, switch to next video
-      if (absoluteTime >= currentSegment.endTime) {
-        const nextIndex = currentVideoIndex + 1;
-        if (nextIndex < clips.length) {
-          setCurrentVideoIndex(nextIndex);
-          setCurrentClip(clips[nextIndex].id);
-          if (videoRef.current) {
-            videoRef.current.currentTime = 0;
-          }
-        } else {
-          setIsPlaying(false);
-          setCurrentTime(0);
-          setCurrentVideoIndex(0);
-          if (clips[0]) {
-            setCurrentClip(clips[0].id);
-          }
-        }
-      } else {
-        setCurrentTime(absoluteTime);
-      }
     }
   };
 
-  // Handle video ended
-  const handleVideoEnded = () => {
-    const nextIndex = currentVideoIndex + 1;
-    if (nextIndex < clips.length) {
-      setCurrentVideoIndex(nextIndex);
-      setCurrentClip(clips[nextIndex].id);
-      if (videoRef.current) {
-        videoRef.current.currentTime = 0;
-      }
-    } else {
-      setIsPlaying(false);
-      setCurrentTime(0);
-      setCurrentVideoIndex(0);
-      if (clips[0]) {
-        setCurrentClip(clips[0].id);
-      }
+  // Handle audio ended
+  const handleAudioEnded = () => {
+    setIsPlaying(false);
+    setCurrentTime(0);
+    setCurrentVideoIndex(0);
+    if (clips[0]) {
+      setCurrentClip(clips[0].id);
+    }
+    if (videoRef.current) {
+      videoRef.current.currentTime = 0;
     }
   };
 
   // Handle play/pause
   const togglePlay = () => {
-    if (!isPlaying) {
+    if (!audioRef.current || !audioUrl) {
+      toast.error('Please upload an audio file first');
+      return;
+    }
+
+    if (isPlaying) {
+      audioRef.current.pause();
+      if (videoRef.current) {
+        videoRef.current.pause();
+      }
+    } else {
       // If starting playback, ensure we're at the right position
       const currentSegment = videoSegments[currentVideoIndex];
       if (currentSegment && videoRef.current) {
         const relativeTime = currentTime - currentSegment.startTime;
         videoRef.current.currentTime = relativeTime;
       }
+      audioRef.current.play().catch(error => {
+        console.error('Error playing audio:', error);
+        toast.error('Error playing audio');
+      });
     }
     setIsPlaying(!isPlaying);
   };
@@ -273,6 +268,11 @@ export const VideoEditor: React.FC = () => {
       return;
     }
 
+    if (!audioUrl) {
+      toast.error('Please upload an audio file before exporting');
+      return;
+    }
+
     setIsExporting(true);
     try {
       const canvas = canvasRef.current;
@@ -284,6 +284,16 @@ export const VideoEditor: React.FC = () => {
       // Create an audio context
       const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
       const audioDestination = audioContext.createMediaStreamDestination();
+
+      // Load and connect the audio file
+      const audioResponse = await fetch(audioUrl);
+      const audioArrayBuffer = await audioResponse.arrayBuffer();
+      const audioBuffer = await audioContext.decodeAudioData(audioArrayBuffer);
+      
+      // Create audio source from the buffer
+      const audioSource = audioContext.createBufferSource();
+      audioSource.buffer = audioBuffer;
+      audioSource.connect(audioDestination);
       
       // Set canvas size to match the first video's dimensions
       const firstClip = clips[0];
@@ -353,6 +363,9 @@ export const VideoEditor: React.FC = () => {
       // Start recording with smaller timeslice for more frequent ondataavailable events
       mediaRecorder.start(1000);
 
+      // Start audio playback
+      audioSource.start(0);
+
       // Process each segment with precise timing
       for (const segment of videoSegments) {
         if (!segment) continue;
@@ -362,13 +375,10 @@ export const VideoEditor: React.FC = () => {
 
         const video = document.createElement('video');
         video.src = clip.url;
+        video.muted = true; // Ensure video is muted
         
         await new Promise<void>((resolve) => {
           video.onloadeddata = async () => {
-            // Set up audio processing for this segment
-            const audioSource = audioContext.createMediaElementSource(video);
-            audioSource.connect(audioDestination);
-            
             video.currentTime = segment.videoStartTime;
             
             const segmentDuration = segment.endTime - segment.startTime;
@@ -378,8 +388,6 @@ export const VideoEditor: React.FC = () => {
             const processFrame = async () => {
               const elapsed = (performance.now() - startTime) / 1000;
               if (elapsed >= segmentDuration) {
-                // Disconnect audio source when segment is done
-                audioSource.disconnect();
                 resolve();
                 return;
               }
@@ -400,7 +408,7 @@ export const VideoEditor: React.FC = () => {
               setTimeout(() => requestAnimationFrame(processFrame), frameInterval);
             };
 
-            // Start video playback for audio
+            // Start video playback
             await video.play();
             processFrame();
           };
@@ -420,7 +428,14 @@ export const VideoEditor: React.FC = () => {
   };
 
   return (
-    <div className="flex flex-col h-full gap-6 p-6">
+    <div className="flex flex-col h-full gap-6 p-6 bg-white rounded-lg shadow-lg">
+      {/* Hidden canvas for video export */}
+      <canvas 
+        ref={canvasRef}
+        className="hidden"
+        style={{ position: 'absolute', left: '-9999px' }}
+      />
+      
       {/* Main content area */}
       <div className="grid grid-cols-12 gap-6">
         {/* Left panel - Video upload and preview */}
@@ -433,8 +448,9 @@ export const VideoEditor: React.FC = () => {
                 src={currentVideoClip.url}
                 className="w-full h-full"
                 controls={false}
-                onTimeUpdate={handleTimeUpdate}
-                onEnded={handleVideoEnded}
+                muted={true}
+                onTimeUpdate={handleAudioTimeUpdate}
+                onEnded={handleAudioEnded}
               />
               
               {/* Playback controls */}
@@ -442,14 +458,15 @@ export const VideoEditor: React.FC = () => {
                 <div className="flex items-center gap-4">
                   <button
                     onClick={togglePlay}
-                    className="p-2 rounded-full bg-primary/90 hover:bg-primary text-white"
+                    className="p-2 rounded-full bg-[#06B6D4] hover:bg-[#0891B2] text-white"
+                    disabled={!audioUrl}
                   >
                     {isPlaying ? <Pause size={20} /> : <Play size={20} />}
                   </button>
                   <div className="flex-1">
                     <div className="h-1 bg-white/30 rounded-full">
                       <div
-                        className="h-full bg-accent rounded-full"
+                        className="h-full bg-[#06B6D4] rounded-full"
                         style={{ width: `${(currentTime / (sortedBeats[sortedBeats.length - 1]?.time || 1)) * 100}%` }}
                       />
                     </div>
@@ -464,18 +481,18 @@ export const VideoEditor: React.FC = () => {
             <div
               {...getRootProps()}
               className={`border-2 border-dashed rounded-lg p-8 text-center transition-colors
-                ${isDragActive ? 'border-primary bg-secondary/20' : 'border-accent hover:border-primary'}`}
+                ${isDragActive ? 'border-[#06B6D4] bg-[#E5F7FA]' : 'border-gray-300 hover:border-[#06B6D4]'}`}
             >
               <input {...getInputProps()} />
               <div className="flex flex-col items-center gap-2">
                 {isLoading ? (
                   <>
-                    <Loader2 className="w-12 h-12 text-primary animate-spin" />
+                    <Loader2 className="w-12 h-12 text-[#06B6D4] animate-spin" />
                     <p className="text-gray-600">Loading videos...</p>
                   </>
                 ) : (
                   <>
-                    <Video className="w-12 h-12 text-primary" />
+                    <Video className="w-12 h-12 text-[#06B6D4]" />
                     <p className="text-gray-700">
                       {isDragActive
                         ? 'Drop the videos here...'
@@ -486,9 +503,34 @@ export const VideoEditor: React.FC = () => {
               </div>
             </div>
           )}
+
+          {/* Video Clips List */}
+          <div className="bg-gray-50 p-4 rounded-lg">
+            <h3 className="text-black font-semibold mb-3" style={{ color: 'black' }}>Video Clips</h3>
+            <div className="space-y-2">
+              {clips.map((clip, index) => (
+                <div
+                  key={clip.id}
+                  className="flex items-center justify-between bg-white p-3 rounded-lg border border-gray-200"
+                >
+                  <div className="flex items-center gap-2">
+                    <span className="text-black font-medium" style={{ color: 'black' }}>
+                      {index + 1}. {clip.name}
+                    </span>
+                  </div>
+                  <button
+                    onClick={() => removeClip(clip.id)}
+                    className="p-1 text-gray-500 hover:text-red-500"
+                  >
+                    <Trash2 size={16} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
 
-        {/* Right panel - Clips and beats */}
+        {/* Right panel */}
         <div className="col-span-4 space-y-4">
           {/* Export button */}
           <button
@@ -497,178 +539,107 @@ export const VideoEditor: React.FC = () => {
             className={`w-full flex items-center justify-center gap-2 px-4 py-3 rounded-lg
               ${isExporting || !clips.length || !beats.length
                 ? 'bg-gray-200 text-gray-500 cursor-not-allowed'
-                : 'bg-primary text-white hover:bg-button-hover'
+                : 'bg-[#06B6D4] text-white hover:bg-[#0891B2]'
               }`}
           >
             {isExporting ? (
               <>
                 <Loader2 className="w-5 h-5 animate-spin" />
-                <span>Exporting...</span>
+                Exporting...
               </>
             ) : (
               <>
                 <Download className="w-5 h-5" />
-                <span>Export Video</span>
+                Export Video
               </>
             )}
           </button>
 
-          {/* Upload more videos button */}
-          <div
-            {...getRootProps()}
-            className="bg-secondary/20 border-2 border-dashed border-accent rounded-lg p-4 text-center cursor-pointer hover:bg-secondary/30 transition-colors"
-          >
-            <input {...getInputProps()} />
-            <Upload className="w-6 h-6 text-primary mx-auto mb-2" />
-            <p className="text-primary text-sm">Upload more videos</p>
-          </div>
-
-          {/* Clips list */}
-          <div className="bg-white rounded-lg shadow p-4">
-            <h3 className="font-semibold mb-3 text-gray-800 text-lg">Video Clips</h3>
-            <div className="space-y-2">
-              {clips?.map((clip, index) => (
-                <div
-                  key={clip.id}
-                  onClick={() => setCurrentClip(clip.id)}
-                  className={`flex items-center gap-2 p-2 rounded cursor-pointer
-                    ${clip.id === currentClip ? 'bg-primary/10 text-primary' : 'hover:bg-secondary/10 text-gray-700'}`}
-                >
-                  <Video size={16} />
-                  <span className="flex-1 truncate">
-                    {index + 1}. {clip.name}
-                  </span>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      removeClip(clip.id);
-                    }}
-                    className="p-1 hover:bg-secondary/20 rounded text-gray-600 hover:text-gray-800"
-                  >
-                    <Trash2 size={14} />
-                  </button>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Beat markers */}
-          <div className="bg-white rounded-lg shadow p-4">
-            <h3 className="font-semibold mb-3 text-gray-800 text-lg">Beat Markers (in seconds)</h3>
+          {/* Beat Markers */}
+          <div className="bg-gray-50 p-4 rounded-lg">
+            <h3 className="text-black font-semibold mb-3" style={{ color: 'black' }}>Beat Markers (in seconds)</h3>
             <div className="flex gap-2 mb-4">
               <input
-                type="number"
+                type="text"
                 value={newBeatTime}
                 onChange={(e) => setNewBeatTime(e.target.value)}
                 placeholder="Time in seconds (e.g., 1.5)"
-                step="0.1"
-                min="0"
-                className="flex-1 px-3 py-2 border border-border-color rounded-lg focus:outline-none focus:ring-2 focus:ring-primary text-gray-700 placeholder-gray-600"
+                className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-black placeholder-gray-500"
               />
               <button
                 onClick={handleAddBeat}
-                className="px-4 py-2 bg-primary text-white rounded-lg hover:bg-button-hover"
+                className="px-4 py-2 bg-[#06B6D4] text-white rounded-lg hover:bg-[#0891B2]"
               >
                 Add Beat
               </button>
             </div>
-            <div className="space-y-2">
-              {beats?.map((beat, index) => (
+            <div className="space-y-2 max-h-48 overflow-y-auto">
+              {sortedBeats.map((beat) => (
                 <div
                   key={beat.id}
-                  className="flex items-center justify-between p-2 bg-secondary/10 rounded"
+                  className="flex items-center justify-between bg-white p-2 rounded-lg border border-gray-200"
                 >
-                  <div className="flex items-center gap-2 text-gray-700">
-                    <Clock size={16} className="text-primary" />
-                    <span>{beat.time.toFixed(2)}s</span>
+                  <span className="text-black" style={{ color: 'black' }}>{beat.time.toFixed(2)}s</span>
+                  {beat.id !== 'start' && (
+                    <button
+                      onClick={() => removeBeat(beat.id)}
+                      className="p-1 text-gray-500 hover:text-red-500"
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Current Segment Info */}
+          <div className="bg-gray-50 p-4 rounded-lg">
+            <h3 className="text-black font-semibold mb-3" style={{ color: 'black' }}>Current Segment Info</h3>
+            {videoSegments.map((segment, index) => {
+              const clip = clips.find(c => c.id === segment?.clipId);
+              if (!segment || !clip) return null;
+
+              return (
+                <div key={index} className="mb-4 bg-white p-3 rounded-lg border border-gray-200">
+                  <h4 className="text-black font-medium mb-2" style={{ color: 'black' }}>Video {index + 1}</h4>
+                  <div className="space-y-1">
+                    <p className="text-black" style={{ color: 'black' }}>Start: {segment.startTime.toFixed(2)}s</p>
+                    <p className="text-black" style={{ color: 'black' }}>End: {segment.endTime.toFixed(2)}s</p>
+                    <p className="text-black" style={{ color: 'black' }}>Duration: {(segment.endTime - segment.startTime).toFixed(2)}s</p>
                   </div>
-                  <button
-                    onClick={() => removeBeat(beat.id)}
-                    className="p-1 hover:bg-secondary/20 rounded text-gray-600 hover:text-gray-800"
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Timeline */}
+          <div className="bg-gray-50 p-4 rounded-lg">
+            <h3 className="text-black font-semibold mb-3" style={{ color: 'black' }}>Timeline</h3>
+            <div className="relative h-20 bg-white rounded-lg border border-gray-200">
+              {videoSegments.map((segment, index) => {
+                if (!segment) return null;
+                const totalDuration = sortedBeats[sortedBeats.length - 1]?.time || 1;
+                const width = ((segment.endTime - segment.startTime) / totalDuration) * 100;
+                const left = (segment.startTime / totalDuration) * 100;
+
+                return (
+                  <div
+                    key={index}
+                    className="absolute h-full bg-[#E5F7FA] border-r border-[#06B6D4] flex items-center justify-center"
+                    style={{
+                      left: `${left}%`,
+                      width: `${width}%`
+                    }}
                   >
-                    <Trash2 size={14} />
-                  </button>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Debug info */}
-          <div className="bg-white rounded-lg shadow p-4">
-            <h3 className="font-semibold mb-3 text-gray-800 text-lg">Current Segment Info</h3>
-            <div className="text-sm space-y-1">
-              {videoSegments.map((segment, index) => segment && (
-                <div key={index} className={`p-2 rounded ${index === currentVideoIndex ? 'bg-primary/10' : 'bg-secondary/10'}`}>
-                  <div className="text-gray-700 font-medium">Video {index + 1}</div>
-                  <div className="text-gray-700">Start: {segment.startTime}s</div>
-                  <div className="text-gray-700">End: {segment.endTime}s</div>
-                  <div className="text-gray-700">Duration: {(segment.endTime - segment.startTime).toFixed(2)}s</div>
-                </div>
-              ))}
+                    <span className="text-black text-sm" style={{ color: 'black' }}>{index + 1}</span>
+                  </div>
+                );
+              })}
             </div>
           </div>
         </div>
       </div>
-
-      {/* Timeline */}
-      <div className="bg-white rounded-lg shadow p-4">
-        <h3 className="font-semibold mb-4 text-gray-800 text-lg">Timeline</h3>
-        <div className="relative h-32 bg-secondary/5 rounded border border-border-color">
-          {/* Beat markers */}
-          {sortedBeats?.map((beat, index) => (
-            <div
-              key={beat.id}
-              className="absolute top-0 bottom-0 w-px bg-accent"
-              style={{ left: `${(beat.time / Math.max(...sortedBeats.map(b => b.time), 1)) * 100}%` }}
-            >
-              <div className="absolute top-0 -translate-x-1/2 px-1 py-0.5 text-xs bg-white rounded text-gray-700 border border-gray-200">
-                {index === 0 ? '0:00' : beat.time.toFixed(2)}s
-              </div>
-            </div>
-          ))}
-
-          {/* Timeline segments */}
-          {timeline?.map((segment, index) => {
-            const clip = clips.find(c => c.id === segment.clipId);
-            if (!clip) return null;
-
-            const totalDuration = Math.max(...sortedBeats.map(b => b.time), 1);
-            const left = (segment.beatStart / totalDuration) * 100;
-            const width = ((segment.beatEnd - segment.beatStart) / totalDuration) * 100;
-
-            return (
-              <motion.div
-                key={segment.id}
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="absolute h-16 top-8 bg-primary/20 rounded cursor-pointer hover:bg-primary/30"
-                style={{ left: `${left}%`, width: `${width}%` }}
-                onClick={() => removeTimelineSegment(segment.id)}
-              >
-                <div className="absolute inset-0 flex items-center justify-center">
-                  <span className="text-xs text-gray-700 font-medium truncate px-2">
-                    Video {index + 1}: {clip.name}
-                  </span>
-                </div>
-              </motion.div>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* Help text */}
-      <div className="text-sm text-gray-500 mt-4">
-        <p>How to use:</p>
-        <ol className="list-decimal list-inside space-y-1">
-          <li>Upload videos in the order you want them to play</li>
-          <li>Add beat markers to specify when to switch videos (e.g., 1, 4, 10 seconds)</li>
-          <li>Videos will automatically play in sequence between beat markers</li>
-          <li>Click on timeline segments to remove them</li>
-        </ol>
-      </div>
-
-      {/* Hidden canvas for video processing */}
-      <canvas ref={canvasRef} className="hidden" />
     </div>
   );
 }; 

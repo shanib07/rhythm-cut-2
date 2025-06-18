@@ -1,34 +1,51 @@
 'use client';
 
-import React from 'react';
-import { VideoEditor } from '../src/components/VideoEditor';
-import { Toaster } from 'sonner';
-import { ErrorBoundary } from 'react-error-boundary';
-import { Music } from 'lucide-react';
+import { Video, Music } from 'lucide-react';
+import Link from 'next/link';
 
-export default function Home() {
+export default function HomePage() {
   return (
-    <ErrorBoundary
-      fallback={
-        <div className="min-h-screen flex items-center justify-center bg-background-light">
-          <div className="text-center space-y-4">
-            <Music className="w-12 h-12 text-highlight mx-auto" />
-            <h1 className="text-xl font-semibold text-text-primary">Error</h1>
-            <p className="text-text-secondary">Something went wrong. Please try again.</p>
-            <button
-              onClick={() => window.location.reload()}
-              className="px-4 py-2 bg-primary text-white rounded-lg hover:bg-button-hover"
-            >
-              Reload
-            </button>
-          </div>
+    <div className="min-h-screen bg-gradient-to-b from-gray-900 to-gray-800 text-white p-8">
+      <div className="max-w-4xl mx-auto">
+        <header className="text-center mb-16">
+          <h1 className="text-5xl font-bold mb-4">Rhythm Cut</h1>
+          <p className="text-xl text-gray-300">
+            Automatically cut and edit videos to the beat of your music
+          </p>
+        </header>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+          <Link 
+            href="/edit"
+            className="group bg-gray-800 hover:bg-gray-700 p-8 rounded-xl transition-all transform hover:scale-105"
+          >
+            <div className="flex flex-col items-center text-center">
+              <Video className="w-16 h-16 mb-4 text-primary" />
+              <h2 className="text-2xl font-semibold mb-2">Beat-Sync Editor</h2>
+              <p className="text-gray-400">
+                Upload your audio and video files to automatically create beat-synchronized edits
+              </p>
+            </div>
+          </Link>
+
+          <Link 
+            href="/beat-test"
+            className="group bg-gray-800 hover:bg-gray-700 p-8 rounded-xl transition-all transform hover:scale-105"
+          >
+            <div className="flex flex-col items-center text-center">
+              <Music className="w-16 h-16 mb-4 text-primary" />
+              <h2 className="text-2xl font-semibold mb-2">Beat Detection Lab</h2>
+              <p className="text-gray-400">
+                Test and fine-tune beat detection algorithms with detailed visualization
+              </p>
+            </div>
+          </Link>
         </div>
-      }
-    >
-      <main className="min-h-screen bg-background-light">
-        <VideoEditor />
-        <Toaster position="bottom-right" />
-      </main>
-    </ErrorBoundary>
+
+        <footer className="mt-16 text-center text-gray-500">
+          <p>Version 1.4.0 - Advanced Beat Detection & Video Editing</p>
+        </footer>
+      </div>
+    </div>
   );
 }
