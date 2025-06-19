@@ -13,7 +13,8 @@ const nextConfig = {
 
     return config;
   },
-  // Add headers for Cross-Origin Isolation (keeping these for future video processing)
+  
+  // Add headers for Cross-Origin Isolation (required for SharedArrayBuffer and FFmpeg.wasm)
   async headers() {
     return [
       {

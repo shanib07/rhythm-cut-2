@@ -4,7 +4,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Music, Video, Play, Pause, AlertCircle, Volume2, Activity, Clock, Timer, ZoomIn, ZoomOut, RefreshCw, Download, ChevronDown, ChevronUp, FileAudio } from 'lucide-react';
 import { AudioAnalyzer } from '@/src/services/AudioAnalyzer';
 import { WaveformVisualizer } from '@/src/components/WaveformVisualizer';
-import { VideoEditor } from '@/src/components/VideoEditor';
+import { FFmpegVideoEditor } from '@/src/components/FFmpegVideoEditor';
 import { useVideoStore } from '@/src/stores/videoStore';
 import { generateUniqueId } from '@/src/utils/videoUtils';
 import { toast } from 'sonner';
@@ -14,17 +14,11 @@ interface OnsetData {
   confidence: number;
 }
 
-interface BeatData {
-  timestamp: number;
-  confidence: number;
-  tempo: number;
-}
-
 interface AnalysisResults {
   beatCount: number;
   averageTempo: number;
   confidence: number;
-  beats: BeatData[];
+  beats: { timestamp: number; confidence: number; tempo: number; }[];
 }
 
 export default function EditPage() {
@@ -243,8 +237,9 @@ export default function EditPage() {
     <div className="min-h-screen bg-[#0F172A] p-8 text-gray-100">
       <header className="mb-8">
         <h1 className="text-3xl font-bold flex items-center gap-2 text-white">
-          <Video className="w-8 h-8 text-[#06B6D4]" /> Beat-Sync Video Editor
+          <Video className="w-8 h-8 text-[#06B6D4]" /> Beat-Sync Video Editor (FFmpeg-Powered)
         </h1>
+        <p className="text-gray-400 mt-2">High-performance video editing with FFmpeg.wasm</p>
       </header>
 
       <div className="space-y-6">
@@ -366,8 +361,8 @@ export default function EditPage() {
           )}
         </div>
 
-        {/* Video Editor Section */}
-        <VideoEditor />
+        {/* FFmpeg Video Editor Section */}
+        <FFmpegVideoEditor />
       </div>
     </div>
   );
