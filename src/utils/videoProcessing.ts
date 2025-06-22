@@ -1,4 +1,4 @@
-import { TimelineSegment, VideoClip, ProcessingStatus } from '../types';
+import { TimelineSegment, VideoClip } from '../types';
 
 export interface ProcessingProgress {
   segment: number;

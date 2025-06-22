@@ -1,5 +1,3 @@
-import { ProcessingStatus } from '../types';
-
 // Types
 export interface VideoMetadata {
   duration: number;

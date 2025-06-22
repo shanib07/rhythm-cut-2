@@ -5,7 +5,7 @@ import Link from 'next/link';
 
 export default function HomePage() {
   return (
-    <div className="min-h-screen bg-gradient-to-b from-gray-900 to-gray-800 text-white p-8">
+    <div className="min-h-screen bg-gradient-to-b from-green-900 to-green-800 text-white p-8">
       <div className="max-w-4xl mx-auto">
         <header className="text-center mb-16">
           <h1 className="text-5xl font-bold mb-4">Rhythm Cut</h1>
@@ -17,7 +17,7 @@ export default function HomePage() {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
           <Link 
             href="/edit"
-            className="group bg-gray-800 hover:bg-gray-700 p-8 rounded-xl transition-all transform hover:scale-105"
+            className="group bg-green-800 hover:bg-green-700 p-8 rounded-xl transition-all transform hover:scale-105"
           >
             <div className="flex flex-col items-center text-center">
               <Video className="w-16 h-16 mb-4 text-primary" />
@@ -30,7 +30,7 @@ export default function HomePage() {
 
           <Link 
             href="/beat-test"
-            className="group bg-gray-800 hover:bg-gray-700 p-8 rounded-xl transition-all transform hover:scale-105"
+            className="group bg-green-800 hover:bg-green-700 p-8 rounded-xl transition-all transform hover:scale-105"
           >
             <div className="flex flex-col items-center text-center">
               <Music className="w-16 h-16 mb-4 text-primary" />

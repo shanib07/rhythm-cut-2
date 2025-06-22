@@ -1,3 +1,5 @@
+import { FFmpeg } from '@ffmpeg/ffmpeg';
+
 export interface VideoSegment {
   id: string;
   startTime: number;
@@ -14,7 +16,7 @@ export interface ProcessingProgress {
 }
 
 export class FFmpegVideoProcessor {
-  private ffmpeg: any = null;
+  private ffmpeg: FFmpeg | null = null;
   private isLoaded = false;
   private audioFile: File | null = null;
   private videoFiles: Map<string, File> = new Map();
@@ -84,6 +86,10 @@ export class FFmpegVideoProcessor {
       await this.initialize();
     }
     
+    if (!this.ffmpeg) {
+      throw new Error('Failed to initialize FFmpeg');
+    }
+    
     this.audioFile = file;
     const { fetchFile } = await import('@ffmpeg/util');
     const audioData = await fetchFile(file);
@@ -95,6 +101,10 @@ export class FFmpegVideoProcessor {
       await this.initialize();
     }
     
+    if (!this.ffmpeg) {
+      throw new Error('Failed to initialize FFmpeg');
+    }
+    
     this.videoFiles.set(id, file);
     const { fetchFile } = await import('@ffmpeg/util');
     const videoData = await fetchFile(file);
@@ -103,6 +113,10 @@ export class FFmpegVideoProcessor {
 
   async createTimeline(segments: VideoSegment[]): Promise<string> {
     await this.initialize();
+
+    if (!this.ffmpeg) {
+      throw new Error('Failed to initialize FFmpeg');
+    }
 
     if (!this.audioFile) {
       throw new Error('Audio file is required');
@@ -165,6 +179,10 @@ export class FFmpegVideoProcessor {
   async exportVideo(segments: VideoSegment[]): Promise<Blob> {
     const outputFileName = await this.createTimeline(segments);
     
+    if (!this.ffmpeg) {
+      throw new Error('Failed to initialize FFmpeg');
+    }
+    
     this.progressCallback?.({
       progress: 0.9,
       stage: 'export',
@@ -185,6 +203,10 @@ export class FFmpegVideoProcessor {
 
   async createPreviewVideo(segments: VideoSegment[], maxDuration = 30): Promise<string> {
     await this.initialize();
+
+    if (!this.ffmpeg) {
+      throw new Error('Failed to initialize FFmpeg');
+    }
 
     if (!this.audioFile || segments.length === 0) {
       throw new Error('Audio file and video segments are required');
@@ -247,6 +269,10 @@ export class FFmpegVideoProcessor {
   }
 
   async getPreviewUrl(): Promise<string> {
+    if (!this.ffmpeg) {
+      throw new Error('FFmpeg is not initialized');
+    }
+    
     const data = await this.ffmpeg.readFile('preview.mp4');
     const blob = new Blob([data], { type: 'video/mp4' });
     return URL.createObjectURL(blob);
