@@ -43,7 +43,7 @@ export default function HomePage() {
         </div>
 
         <footer className="mt-16 text-center text-gray-500">
-          <p>Version 1.4.0 - Advanced Beat Detection & Video Editing</p>
+          <p>Version 2.0.1 - Green Theme & Advanced Beat Detection</p>
         </footer>
       </div>
     </div>
