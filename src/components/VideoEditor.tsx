@@ -1,7 +1,7 @@
 import React, { useCallback, useState, useRef, useEffect, useMemo } from 'react';
 import { useDropzone } from 'react-dropzone';
 import { motion } from 'framer-motion';
-import { Play, Pause, Plus, Trash2, Music, Video, Loader2, Upload, Clock, Download } from 'lucide-react';
+import { Play, Pause, Plus, Trash2, Music, Video, Loader2, Upload, Clock, Download, X } from 'lucide-react';
 import { useVideoStore } from '../stores/videoStore';
 import { generateUniqueId } from '../utils/videoUtils';
 import { VideoClip, BeatMarker, TimelineSegment } from '../types';
@@ -37,6 +37,10 @@ export const VideoEditor: React.FC = () => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const recordedChunksRef = useRef<Blob[]>([]);
+  const [isPreviewMode, setIsPreviewMode] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [exportUrl, setExportUrl] = useState<string | null>(null);
 
   // Sort beats and add 0 if not present
   const sortedBeats = useMemo(() => {
@@ -427,8 +431,82 @@ export const VideoEditor: React.FC = () => {
     }
   };
 
+  const handlePreview = async () => {
+    setIsPreviewMode(true);
+    setIsProcessing(true);
+    try {
+      // Create a preview of the edited video
+      const formData = new FormData();
+      clips.forEach((clip, index) => {
+        formData.append(`video${index}`, clip.file);
+      });
+
+      const response = await fetch('/api/preview', {
+        method: 'POST',
+        body: JSON.stringify({
+          name: 'Preview',
+          inputVideos: clips.map(clip => ({
+            id: clip.id,
+            url: clip.url,
+            duration: clip.duration
+          })),
+          beatMarkers: sortedBeats.map(beat => beat.time)
+        }),
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      });
+
+      const data = await response.json();
+      if (data.success) {
+        setPreviewUrl(data.previewUrl);
+      } else {
+        throw new Error(data.error || 'Preview generation failed');
+      }
+    } catch (error) {
+      console.error('Preview failed:', error);
+      toast.error('Failed to generate preview');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleExport = async () => {
+    setIsProcessing(true);
+    try {
+      const response = await fetch('/api/process', {
+        method: 'POST',
+        body: JSON.stringify({
+          name: 'Export',
+          inputVideos: clips.map(clip => ({
+            id: clip.id,
+            url: clip.url,
+            duration: clip.duration
+          })),
+          beatMarkers: sortedBeats.map(beat => beat.time)
+        }),
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      });
+
+      const data = await response.json();
+      if (data.success) {
+        setExportUrl(data.outputUrl);
+        toast.success('Video exported successfully!');
+      } else {
+        throw new Error(data.error || 'Export failed');
+      }
+    } catch (error) {
+      console.error('Export failed:', error);
+      toast.error('Failed to export video');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
   return (
-    <div className="flex flex-col h-full gap-6 p-6 bg-white rounded-lg shadow-lg">
+    <div className="flex flex-col h-full gap-6 p-6 bg-gradient-to-b from-navy-900 to-blue-950 rounded-lg shadow-lg">
       {/* Hidden canvas for video export */}
       <canvas 
         ref={canvasRef}
@@ -640,6 +718,96 @@ export const VideoEditor: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* Preview Modal */}
+      {previewUrl && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-8 z-50">
+          <div className="bg-white rounded-lg p-4 w-full max-w-4xl">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-xl font-semibold text-gray-900">Preview</h3>
+              <button
+                onClick={() => {
+                  setPreviewUrl(null);
+                  setIsPreviewMode(false);
+                }}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                <X size={24} />
+              </button>
+            </div>
+            <video
+              src={previewUrl}
+              controls
+              className="w-full rounded-lg"
+              autoPlay
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Action Buttons */}
+      <div className="flex gap-4 mt-6">
+        <button
+          onClick={handlePreview}
+          disabled={isProcessing || clips.length === 0 || sortedBeats.length === 0}
+          className={`flex-1 flex items-center justify-center gap-2 px-6 py-3 rounded-lg
+            ${isProcessing || clips.length === 0 || sortedBeats.length === 0
+              ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+              : 'bg-blue-500 text-white hover:bg-blue-600'
+            }`}
+        >
+          {isProcessing && isPreviewMode ? (
+            <>
+              <Loader2 className="w-5 h-5 animate-spin" />
+              Generating Preview...
+            </>
+          ) : (
+            <>
+              <Play className="w-5 h-5" />
+              Preview
+            </>
+          )}
+        </button>
+
+        <button
+          onClick={handleExport}
+          disabled={isProcessing || clips.length === 0 || sortedBeats.length === 0}
+          className={`flex-1 flex items-center justify-center gap-2 px-6 py-3 rounded-lg
+            ${isProcessing || clips.length === 0 || sortedBeats.length === 0
+              ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+              : 'bg-green-500 text-white hover:bg-green-600'
+            }`}
+        >
+          {isProcessing && !isPreviewMode ? (
+            <>
+              <Loader2 className="w-5 h-5 animate-spin" />
+              Exporting...
+            </>
+          ) : (
+            <>
+              <Download className="w-5 h-5" />
+              Export
+            </>
+          )}
+        </button>
+      </div>
+
+      {/* Export URL */}
+      {exportUrl && (
+        <div className="mt-4 p-4 bg-white/10 rounded-lg">
+          <div className="flex items-center justify-between">
+            <span className="text-green-400">Export complete!</span>
+            <a
+              href={exportUrl}
+              download
+              className="flex items-center gap-2 px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600"
+            >
+              <Download className="w-4 h-4" />
+              Download Video
+            </a>
+          </div>
+        </div>
+      )}
     </div>
   );
 }; 
