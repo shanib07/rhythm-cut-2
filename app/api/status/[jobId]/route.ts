@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
 import Queue from 'bull';
 
 if (!process.env.REDIS_URL) {
@@ -9,11 +9,19 @@ const previewQueue = new Queue('video-preview', process.env.REDIS_URL);
 const exportQueue = new Queue('video-processing', process.env.REDIS_URL);
 
 export async function GET(
-  _request: NextRequest,
-  context: { params: { jobId: string } }
-) {
+  req: Request
+): Promise<Response> {
   try {
-    const jobId = context.params.jobId;
+    const url = new URL(req.url);
+    const segments = url.pathname.split('/');
+    const jobId = segments[segments.length - 1];
+    
+    if (!jobId) {
+      return NextResponse.json(
+        { error: 'Job ID is required' },
+        { status: 400 }
+      );
+    }
     
     // Check preview queue first
     let job = await previewQueue.getJob(jobId);
