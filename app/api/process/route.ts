@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import Queue from 'bull';
 import { PrismaClient } from '@prisma/client';
-import { getServerSession } from 'next-auth';
 
 const prisma = new PrismaClient();
 
@@ -13,12 +12,6 @@ const videoQueue = new Queue('video-processing', process.env.REDIS_URL);
 
 export async function POST(req: NextRequest) {
   try {
-    // Get authenticated user
-    const session = await getServerSession();
-    if (!session?.user?.email) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
     const { name, inputVideos, beatMarkers } = await req.json();
 
     // Validate input
@@ -30,21 +23,10 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Get or create user
-    const user = await prisma.user.upsert({
-      where: { email: session.user.email },
-      update: {},
-      create: {
-        email: session.user.email,
-        name: session.user.name || 'Anonymous'
-      }
-    });
-
     // Create new project
     const project = await prisma.project.create({
       data: {
         name,
-        userId: user.id,
         inputVideos,
         beatMarkers,
         status: 'pending'
