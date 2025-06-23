@@ -9,11 +9,11 @@ const previewQueue = new Queue('video-preview', process.env.REDIS_URL);
 const exportQueue = new Queue('video-processing', process.env.REDIS_URL);
 
 export async function GET(
-  request: NextRequest,
-  { params }: { params: { jobId: string } }
+  _request: NextRequest,
+  context: { params: { jobId: string } }
 ) {
   try {
-    const jobId = params.jobId;
+    const jobId = context.params.jobId;
     
     // Check preview queue first
     let job = await previewQueue.getJob(jobId);
