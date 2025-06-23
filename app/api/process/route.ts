@@ -2,15 +2,19 @@ import { NextRequest, NextResponse } from 'next/server';
 import Queue from 'bull';
 import { PrismaClient } from '@prisma/client';
 import { getServerSession } from 'next-auth';
-import { authOptions } from '../auth/[...nextauth]/route';
 
 const prisma = new PrismaClient();
+
+if (!process.env.REDIS_URL) {
+  throw new Error('REDIS_URL is not defined');
+}
+
 const videoQueue = new Queue('video-processing', process.env.REDIS_URL);
 
 export async function POST(req: NextRequest) {
   try {
     // Get authenticated user
-    const session = await getServerSession(authOptions);
+    const session = await getServerSession();
     if (!session?.user?.email) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
