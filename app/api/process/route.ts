@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import Queue from 'bull';
 import { PrismaClient } from '@prisma/client';
+import { getServerSession } from 'next-auth';
 
 const prisma = new PrismaClient();
 
@@ -8,17 +9,23 @@ if (!process.env.REDIS_URL) {
   throw new Error('REDIS_URL is not defined');
 }
 
-const videoQueue = new Queue('video-processing', process.env.REDIS_URL);
-
-interface ProcessRequest {
-  name: string;
-  inputVideos: string[];
-  beatMarkers: number[];
+interface VideoInput {
+  id: string;
+  url: string;
+  duration: number;
 }
 
-export async function POST(request: NextRequest) {
+const videoQueue = new Queue('video-processing', process.env.REDIS_URL);
+
+export async function POST(req: NextRequest) {
   try {
-    const body = await request.json() as ProcessRequest;
+    // Get authenticated user
+    const session = await getServerSession();
+    if (!session?.user?.email) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const body = await req.json();
     const { name, inputVideos, beatMarkers } = body;
 
     // Validate input
@@ -30,11 +37,36 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Validate video input structure
+    const validVideos = inputVideos.every((video: any) => 
+      typeof video.id === 'string' &&
+      typeof video.url === 'string' &&
+      typeof video.duration === 'number'
+    );
+
+    if (!validVideos) {
+      return NextResponse.json(
+        { error: 'Invalid video input format' },
+        { status: 400 }
+      );
+    }
+
+    // Get or create user
+    const user = await prisma.user.upsert({
+      where: { email: session.user.email },
+      update: {},
+      create: {
+        email: session.user.email,
+        name: session.user.name || 'Anonymous'
+      }
+    });
+
     // Create new project
     const project = await prisma.project.create({
       data: {
         name,
-        inputVideos,
+        userId: user.id,
+        inputVideos: JSON.parse(JSON.stringify(inputVideos)),
         beatMarkers,
         status: 'pending'
       }

@@ -134,7 +134,18 @@ exportQueue.process('process-video', async (job) => {
     }
 
     // Parse input videos from project JSON
-    const inputVideos = project.inputVideos as VideoInput[];
+    let inputVideos: VideoInput[];
+    try {
+      // Handle both JSON object and already parsed object
+      if (Array.isArray(project.inputVideos)) {
+        inputVideos = project.inputVideos as unknown as VideoInput[];
+      } else {
+        inputVideos = JSON.parse(project.inputVideos as string) as VideoInput[];
+      }
+    } catch (error) {
+      console.error('Failed to parse input videos:', error);
+      throw new Error('Invalid input videos format');
+    }
 
     // Create temp output directory
     const outputDir = path.join(__dirname, '../tmp/exports');
