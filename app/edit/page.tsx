@@ -4,7 +4,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Music, Video, Play, Pause, AlertCircle, Volume2, Activity, Clock, Timer, ZoomIn, ZoomOut, RefreshCw, Download, ChevronDown, ChevronUp, FileAudio } from 'lucide-react';
 import { AudioAnalyzer } from '@/src/services/AudioAnalyzer';
 import { WaveformVisualizer } from '@/src/components/WaveformVisualizer';
-import { FFmpegVideoEditor } from '@/src/components/FFmpegVideoEditor';
+import { ImprovedVideoEditor } from '@/src/components/ImprovedVideoEditor';
 import { useVideoStore } from '@/src/stores/videoStore';
 import { generateUniqueId } from '@/src/utils/videoUtils';
 import { toast } from 'sonner';
@@ -361,8 +361,8 @@ export default function EditPage() {
           )}
         </div>
 
-        {/* FFmpeg Video Editor Section */}
-        <FFmpegVideoEditor />
+        {/* Improved Video Editor Section */}
+        <ImprovedVideoEditor />
       </div>
     </div>
   );
