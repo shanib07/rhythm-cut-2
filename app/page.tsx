@@ -2,7 +2,7 @@
 
 import { Video, Music } from 'lucide-react';
 import Link from 'next/link';
-import VideoEditor from '@/components/VideoEditor';
+import { VideoEditor } from '@/src/components/VideoEditor';
 
 export default function Home() {
   return (
