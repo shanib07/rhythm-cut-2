@@ -3,9 +3,16 @@ import { PrismaClient } from '@prisma/client';
 
 const prisma = new PrismaClient();
 
+interface RouteParams {
+  params: {
+    projectId: string;
+  };
+  searchParams: { [key: string]: string | string[] | undefined };
+}
+
 export async function GET(
-  req: NextRequest,
-  { params }: { params: { projectId: string } }
+  request: NextRequest,
+  { params }: RouteParams
 ) {
   try {
     const { projectId } = params;

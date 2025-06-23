@@ -10,9 +10,16 @@ if (!process.env.REDIS_URL) {
 
 const videoQueue = new Queue('video-processing', process.env.REDIS_URL);
 
-export async function POST(req: NextRequest) {
+interface ProcessRequest {
+  name: string;
+  inputVideos: string[];
+  beatMarkers: number[];
+}
+
+export async function POST(request: NextRequest) {
   try {
-    const { name, inputVideos, beatMarkers } = await req.json();
+    const body = await request.json() as ProcessRequest;
+    const { name, inputVideos, beatMarkers } = body;
 
     // Validate input
     if (!name || !inputVideos || !beatMarkers || 
