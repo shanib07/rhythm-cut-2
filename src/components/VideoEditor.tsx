@@ -7,6 +7,11 @@ import { generateUniqueId } from '../utils/videoUtils';
 import { VideoClip, BeatMarker, TimelineSegment } from '../types';
 import { toast } from 'sonner';
 
+interface VideoFile {
+  file: File;
+  preview: string;
+}
+
 export const VideoEditor: React.FC = () => {
   const {
     clips = [],
@@ -37,6 +42,9 @@ export const VideoEditor: React.FC = () => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const recordedChunksRef = useRef<Blob[]>([]);
+  const [videos, setVideos] = useState<VideoFile[]>([]);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [exportUrl, setExportUrl] = useState<string | null>(null);
 
   // Sort beats and add 0 if not present
   const sortedBeats = useMemo(() => {
@@ -170,45 +178,25 @@ export const VideoEditor: React.FC = () => {
   const onDrop = useCallback(async (acceptedFiles: File[]) => {
     setLoading(true);
     try {
-      for (const file of acceptedFiles) {
-        if (file.type.startsWith('video/')) {
-          const clipId = generateUniqueId();
-          const url = URL.createObjectURL(file);
-          
-          const video = document.createElement('video');
-          video.src = url;
-          
-          await new Promise((resolve) => {
-            video.onloadedmetadata = () => {
-              const newClip: VideoClip = {
-                id: clipId,
-                file,
-                url,
-                duration: video.duration,
-                name: file.name
-              };
-              addClip(newClip);
-              
-              if (clips.length === 0) {
-                setCurrentClip(clipId);
-                setCurrentVideoIndex(0);
-              }
-
-              resolve(null);
-            };
-          });
-        }
-      }
+      const newVideos = await Promise.all(
+        acceptedFiles.map(async (file) => ({
+          file,
+          preview: URL.createObjectURL(file)
+        }))
+      );
+      setVideos([...videos, ...newVideos]);
     } catch (error) {
       console.error('Error loading videos:', error);
     } finally {
       setLoading(false);
     }
-  }, [addClip, setCurrentClip, clips.length, setLoading]);
+  }, [videos, setLoading]);
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
-    accept: { 'video/*': [] },
+    accept: {
+      'video/*': ['.mp4', '.mov', '.avi']
+    },
     multiple: true
   });
 
@@ -427,219 +415,113 @@ export const VideoEditor: React.FC = () => {
     }
   };
 
-  return (
-    <div className="flex flex-col h-full gap-6 p-6 bg-white rounded-lg shadow-lg">
-      {/* Hidden canvas for video export */}
-      <canvas 
-        ref={canvasRef}
-        className="hidden"
-        style={{ position: 'absolute', left: '-9999px' }}
-      />
+  const handlePreview = async () => {
+    if (videos.length === 0) return;
+    
+    // For now, just play the first video
+    const video = document.getElementById('preview') as HTMLVideoElement;
+    if (video) {
+      video.play();
+    }
+  };
+
+  const handleExport = async () => {
+    if (videos.length === 0) return;
+    
+    setIsProcessing(true);
+    try {
+      // Create FormData with videos
+      const formData = new FormData();
+      videos.forEach((video, index) => {
+        formData.append(`video${index}`, video.file);
+      });
+
+      // Send to our API
+      const response = await fetch('/api/process', {
+        method: 'POST',
+        body: JSON.stringify({
+          name: 'My Video Project',
+          inputVideos: videos.map(v => URL.createObjectURL(v.file)),
+          beatMarkers: [0, 2, 4, 6] // Example markers every 2 seconds
+        })
+      });
+
+      const data = await response.json();
       
-      {/* Main content area */}
-      <div className="grid grid-cols-12 gap-6">
-        {/* Left panel - Video upload and preview */}
-        <div className="col-span-8 space-y-4">
-          {/* Video preview */}
-          {currentVideoClip ? (
-            <div className="relative aspect-video bg-black rounded-lg overflow-hidden">
-              <video
-                ref={videoRef}
-                src={currentVideoClip.url}
-                className="w-full h-full"
-                controls={false}
-                muted={true}
-                onTimeUpdate={handleAudioTimeUpdate}
-                onEnded={handleAudioEnded}
-              />
-              
-              {/* Playback controls */}
-              <div className="absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-black/50 to-transparent">
-                <div className="flex items-center gap-4">
-                  <button
-                    onClick={togglePlay}
-                    className="p-2 rounded-full bg-[#06B6D4] hover:bg-[#0891B2] text-white"
-                    disabled={!audioUrl}
-                  >
-                    {isPlaying ? <Pause size={20} /> : <Play size={20} />}
-                  </button>
-                  <div className="flex-1">
-                    <div className="h-1 bg-white/30 rounded-full">
-                      <div
-                        className="h-full bg-[#06B6D4] rounded-full"
-                        style={{ width: `${(currentTime / (sortedBeats[sortedBeats.length - 1]?.time || 1)) * 100}%` }}
-                      />
-                    </div>
-                  </div>
-                  <span className="text-white text-sm">
-                    {currentTime.toFixed(2)}s
-                  </span>
-                </div>
-              </div>
-            </div>
-          ) : (
-            <div
-              {...getRootProps()}
-              className={`border-2 border-dashed rounded-lg p-8 text-center transition-colors
-                ${isDragActive ? 'border-[#06B6D4] bg-[#E5F7FA]' : 'border-gray-300 hover:border-[#06B6D4]'}`}
-            >
-              <input {...getInputProps()} />
-              <div className="flex flex-col items-center gap-2">
-                {isLoading ? (
-                  <>
-                    <Loader2 className="w-12 h-12 text-[#06B6D4] animate-spin" />
-                    <p className="text-gray-600">Loading videos...</p>
-                  </>
-                ) : (
-                  <>
-                    <Video className="w-12 h-12 text-[#06B6D4]" />
-                    <p className="text-gray-700">
-                      {isDragActive
-                        ? 'Drop the videos here...'
-                        : 'Drag & drop videos, or click to select'}
-                    </p>
-                  </>
-                )}
-              </div>
-            </div>
-          )}
+      if (data.success) {
+        setExportUrl(data.outputUrl);
+      } else {
+        throw new Error(data.error || 'Export failed');
+      }
+    } catch (error) {
+      console.error('Export failed:', error);
+      alert('Failed to export video. Please try again.');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
 
-          {/* Video Clips List */}
-          <div className="bg-gray-50 p-4 rounded-lg">
-            <h3 className="text-black font-semibold mb-3" style={{ color: 'black' }}>Video Clips</h3>
-            <div className="space-y-2">
-              {clips.map((clip, index) => (
-                <div
-                  key={clip.id}
-                  className="flex items-center justify-between bg-white p-3 rounded-lg border border-gray-200"
-                >
-                  <div className="flex items-center gap-2">
-                    <span className="text-black font-medium" style={{ color: 'black' }}>
-                      {index + 1}. {clip.name}
-                    </span>
-                  </div>
-                  <button
-                    onClick={() => removeClip(clip.id)}
-                    className="p-1 text-gray-500 hover:text-red-500"
-                  >
-                    <Trash2 size={16} />
-                  </button>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-
-        {/* Right panel */}
-        <div className="col-span-4 space-y-4">
-          {/* Export button */}
-          <button
-            onClick={exportVideo}
-            disabled={isExporting || !clips.length || !beats.length}
-            className={`w-full flex items-center justify-center gap-2 px-4 py-3 rounded-lg
-              ${isExporting || !clips.length || !beats.length
-                ? 'bg-gray-200 text-gray-500 cursor-not-allowed'
-                : 'bg-[#06B6D4] text-white hover:bg-[#0891B2]'
-              }`}
-          >
-            {isExporting ? (
-              <>
-                <Loader2 className="w-5 h-5 animate-spin" />
-                Exporting...
-              </>
-            ) : (
-              <>
-                <Download className="w-5 h-5" />
-                Export Video
-              </>
-            )}
-          </button>
-
-          {/* Beat Markers */}
-          <div className="bg-gray-50 p-4 rounded-lg">
-            <h3 className="text-black font-semibold mb-3" style={{ color: 'black' }}>Beat Markers (in seconds)</h3>
-            <div className="flex gap-2 mb-4">
-              <input
-                type="text"
-                value={newBeatTime}
-                onChange={(e) => setNewBeatTime(e.target.value)}
-                placeholder="Time in seconds (e.g., 1.5)"
-                className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-black placeholder-gray-500"
-              />
-              <button
-                onClick={handleAddBeat}
-                className="px-4 py-2 bg-[#06B6D4] text-white rounded-lg hover:bg-[#0891B2]"
-              >
-                Add Beat
-              </button>
-            </div>
-            <div className="space-y-2 max-h-48 overflow-y-auto">
-              {sortedBeats.map((beat) => (
-                <div
-                  key={beat.id}
-                  className="flex items-center justify-between bg-white p-2 rounded-lg border border-gray-200"
-                >
-                  <span className="text-black" style={{ color: 'black' }}>{beat.time.toFixed(2)}s</span>
-                  {beat.id !== 'start' && (
-                    <button
-                      onClick={() => removeBeat(beat.id)}
-                      className="p-1 text-gray-500 hover:text-red-500"
-                    >
-                      <Trash2 size={16} />
-                    </button>
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Current Segment Info */}
-          <div className="bg-gray-50 p-4 rounded-lg">
-            <h3 className="text-black font-semibold mb-3" style={{ color: 'black' }}>Current Segment Info</h3>
-            {videoSegments.map((segment, index) => {
-              const clip = clips.find(c => c.id === segment?.clipId);
-              if (!segment || !clip) return null;
-
-              return (
-                <div key={index} className="mb-4 bg-white p-3 rounded-lg border border-gray-200">
-                  <h4 className="text-black font-medium mb-2" style={{ color: 'black' }}>Video {index + 1}</h4>
-                  <div className="space-y-1">
-                    <p className="text-black" style={{ color: 'black' }}>Start: {segment.startTime.toFixed(2)}s</p>
-                    <p className="text-black" style={{ color: 'black' }}>End: {segment.endTime.toFixed(2)}s</p>
-                    <p className="text-black" style={{ color: 'black' }}>Duration: {(segment.endTime - segment.startTime).toFixed(2)}s</p>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-
-          {/* Timeline */}
-          <div className="bg-gray-50 p-4 rounded-lg">
-            <h3 className="text-black font-semibold mb-3" style={{ color: 'black' }}>Timeline</h3>
-            <div className="relative h-20 bg-white rounded-lg border border-gray-200">
-              {videoSegments.map((segment, index) => {
-                if (!segment) return null;
-                const totalDuration = sortedBeats[sortedBeats.length - 1]?.time || 1;
-                const width = ((segment.endTime - segment.startTime) / totalDuration) * 100;
-                const left = (segment.startTime / totalDuration) * 100;
-
-                return (
-                  <div
-                    key={index}
-                    className="absolute h-full bg-[#E5F7FA] border-r border-[#06B6D4] flex items-center justify-center"
-                    style={{
-                      left: `${left}%`,
-                      width: `${width}%`
-                    }}
-                  >
-                    <span className="text-black text-sm" style={{ color: 'black' }}>{index + 1}</span>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        </div>
+  return (
+    <div className="space-y-8">
+      {/* Upload Section */}
+      <div
+        {...getRootProps()}
+        className="border-2 border-dashed border-gray-600 rounded-lg p-8 text-center cursor-pointer hover:border-gray-400 transition-colors"
+      >
+        <input {...getInputProps()} />
+        <Upload className="mx-auto h-12 w-12 text-gray-400 mb-4" />
+        <p className="text-gray-300">Drag & drop videos here, or click to select files</p>
       </div>
+
+      {/* Preview Section */}
+      {videos.length > 0 && (
+        <div className="space-y-4">
+          <h2 className="text-2xl font-semibold text-white">Preview</h2>
+          <div className="aspect-video bg-black rounded-lg overflow-hidden">
+            <video
+              id="preview"
+              src={videos[0].preview}
+              className="w-full h-full"
+              controls
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Actions */}
+      <div className="flex gap-4">
+        <button
+          onClick={handlePreview}
+          disabled={videos.length === 0}
+          className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          <Play className="h-5 w-5" />
+          Preview
+        </button>
+        
+        <button
+          onClick={handleExport}
+          disabled={videos.length === 0 || isProcessing}
+          className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          <Download className="h-5 w-5" />
+          {isProcessing ? 'Processing...' : 'Export'}
+        </button>
+      </div>
+
+      {/* Export URL */}
+      {exportUrl && (
+        <div className="mt-4 p-4 bg-gray-800 rounded-lg">
+          <p className="text-green-400">Export complete! Download your video:</p>
+          <a
+            href={exportUrl}
+            download
+            className="text-blue-400 hover:underline break-all"
+          >
+            {exportUrl}
+          </a>
+        </div>
+      )}
     </div>
   );
 }; 
