@@ -3,19 +3,12 @@ import { PrismaClient } from '@prisma/client';
 
 const prisma = new PrismaClient();
 
-interface RouteParams {
-  params: {
-    projectId: string;
-  };
-  searchParams: { [key: string]: string | string[] | undefined };
-}
-
 export async function GET(
   request: NextRequest,
-  { params }: RouteParams
+  context: { params: { projectId: string } }
 ) {
   try {
-    const { projectId } = params;
+    const { projectId } = context.params;
 
     // Get project status
     const project = await prisma.project.findUnique({

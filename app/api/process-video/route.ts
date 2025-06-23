@@ -38,22 +38,31 @@ export async function POST(request: NextRequest) {
 }
 
 export async function GET(request: NextRequest) {
-  // Check processing status
-  const jobId = request.nextUrl.searchParams.get('jobId');
-  
-  if (!jobId) {
+  try {
+    // Check processing status
+    const { searchParams } = request.nextUrl;
+    const jobId = searchParams.get('jobId');
+    
+    if (!jobId) {
+      return NextResponse.json(
+        { success: false, error: 'Job ID required' },
+        { status: 400 }
+      );
+    }
+    
+    // TODO: Check actual job status from queue
+    return NextResponse.json({
+      success: true,
+      jobId,
+      status: 'processing', // 'pending' | 'processing' | 'completed' | 'failed'
+      progress: 45,
+      estimatedTimeRemaining: '1 minute'
+    });
+  } catch (error) {
+    console.error('Status check error:', error);
     return NextResponse.json(
-      { success: false, error: 'Job ID required' },
-      { status: 400 }
+      { success: false, error: 'Internal server error' },
+      { status: 500 }
     );
   }
-  
-  // TODO: Check actual job status from queue
-  return NextResponse.json({
-    success: true,
-    jobId,
-    status: 'processing', // 'pending' | 'processing' | 'completed' | 'failed'
-    progress: 45,
-    estimatedTimeRemaining: '1 minute'
-  });
 } 
