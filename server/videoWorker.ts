@@ -10,12 +10,28 @@ if (!process.env.REDIS_URL) {
   throw new Error('REDIS_URL is not defined');
 }
 
+interface VideoInput {
+  id: string;
+  url: string;
+  duration: number;
+}
+
+interface ProcessingOptions {
+  quality: 'low' | 'high';
+  resolution: '720p' | '1080p';
+}
+
 // Create queues for preview and export
 const previewQueue = new Queue('video-preview', process.env.REDIS_URL);
 const exportQueue = new Queue('video-processing', process.env.REDIS_URL);
 
 // Process videos based on beat markers
-async function processVideo(inputVideos: any[], beatMarkers: number[], outputPath: string, options: { quality: string; resolution: string }) {
+async function processVideo(
+  inputVideos: VideoInput[],
+  beatMarkers: number[],
+  outputPath: string,
+  options: ProcessingOptions
+): Promise<string> {
   return new Promise((resolve, reject) => {
     let command = ffmpeg();
     
@@ -25,8 +41,8 @@ async function processVideo(inputVideos: any[], beatMarkers: number[], outputPat
     });
 
     // Generate complex filter for video switching
-    const filterComplex = [];
-    const outputSelector = [];
+    const filterComplex: string[] = [];
+    const outputSelector: string[] = [];
     
     inputVideos.forEach((_, index) => {
       // Enable video until next beat marker
@@ -76,10 +92,15 @@ previewQueue.process('create-preview', async (job) => {
     const outputPath = path.join(outputDir, `preview-${job.id}.mp4`);
 
     // Process the video with lower quality for preview
-    await processVideo(inputVideos, beatMarkers, outputPath, {
-      quality: 'low',
-      resolution: '720p'
-    });
+    await processVideo(
+      inputVideos,
+      beatMarkers,
+      outputPath,
+      {
+        quality: 'low',
+        resolution: '720p'
+      }
+    );
 
     // TODO: Upload to cloud storage in production
     const previewUrl = outputPath;
@@ -112,6 +133,9 @@ exportQueue.process('process-video', async (job) => {
       throw new Error('Project not found');
     }
 
+    // Parse input videos from project JSON
+    const inputVideos = project.inputVideos as VideoInput[];
+
     // Create temp output directory
     const outputDir = path.join(__dirname, '../tmp/exports');
     await fs.mkdir(outputDir, { recursive: true });
@@ -119,10 +143,15 @@ exportQueue.process('process-video', async (job) => {
     const outputPath = path.join(outputDir, `${projectId}.mp4`);
 
     // Process the video with high quality for export
-    await processVideo(project.inputVideos, project.beatMarkers, outputPath, {
-      quality: 'high',
-      resolution: '1080p'
-    });
+    await processVideo(
+      inputVideos,
+      project.beatMarkers,
+      outputPath,
+      {
+        quality: 'high',
+        resolution: '1080p'
+      }
+    );
 
     // TODO: Upload to cloud storage in production
     const outputUrl = outputPath;
