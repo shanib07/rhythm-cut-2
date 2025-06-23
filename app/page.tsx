@@ -1,51 +1,38 @@
 'use client';
 
-import { Video, Music } from 'lucide-react';
-import Link from 'next/link';
+import { useSession, signOut } from 'next-auth/react';
+import { redirect } from 'next/navigation';
+import { VideoEditor } from '../components/VideoEditor';
 
-export default function HomePage() {
-  return (
-    <div className="min-h-screen bg-gradient-to-b from-navy-900 to-blue-950 text-white p-8">
-      <div className="max-w-4xl mx-auto">
-        <header className="text-center mb-16">
-          <h1 className="text-5xl font-bold mb-4 text-blue-100">Rhythm Cut</h1>
-          <p className="text-xl text-blue-200">
-            Automatically cut and edit videos to the beat of your music
-          </p>
-        </header>
+export default function Home() {
+  const { data: session, status } = useSession();
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-          <Link 
-            href="/edit"
-            className="group bg-blue-900/50 hover:bg-blue-800/50 p-8 rounded-xl transition-all transform hover:scale-105 border border-blue-700/30 backdrop-blur-sm"
-          >
-            <div className="flex flex-col items-center text-center">
-              <Video className="w-16 h-16 mb-4 text-blue-400" />
-              <h2 className="text-2xl font-semibold mb-2 text-blue-100">Beat-Sync Editor</h2>
-              <p className="text-blue-200">
-                Upload your audio and video files to automatically create beat-synchronized edits
-              </p>
-            </div>
-          </Link>
-
-          <Link 
-            href="/beat-test"
-            className="group bg-blue-900/50 hover:bg-blue-800/50 p-8 rounded-xl transition-all transform hover:scale-105 border border-blue-700/30 backdrop-blur-sm"
-          >
-            <div className="flex flex-col items-center text-center">
-              <Music className="w-16 h-16 mb-4 text-blue-400" />
-              <h2 className="text-2xl font-semibold mb-2 text-blue-100">Beat Detection Lab</h2>
-              <p className="text-blue-200">
-                Test and fine-tune beat detection algorithms with detailed visualization
-              </p>
-            </div>
-          </Link>
-        </div>
-
-        <footer className="mt-16 text-center text-blue-400">
-          <p>Version 2.0.2 - Navy Theme & Advanced Beat Detection</p>
-        </footer>
+  if (status === 'loading') {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-900">
+        <div className="text-white">Loading...</div>
       </div>
-    </div>
+    );
+  }
+
+  if (!session) {
+    redirect('/auth/signin');
+  }
+
+  return (
+    <main className="min-h-screen bg-gray-900">
+      <div className="container mx-auto px-4 py-8">
+        <div className="flex justify-between items-center mb-8">
+          <h1 className="text-2xl font-bold text-white">Welcome, {session.user?.name}</h1>
+          <button
+            onClick={() => signOut()}
+            className="px-4 py-2 text-sm text-white bg-red-600 rounded hover:bg-red-700"
+          >
+            Sign Out
+          </button>
+        </div>
+        <VideoEditor />
+      </div>
+    </main>
   );
 }
