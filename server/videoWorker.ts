@@ -25,59 +25,131 @@ interface ProcessingOptions {
 const previewQueue = new Queue('video-preview', process.env.REDIS_URL);
 const exportQueue = new Queue('video-processing', process.env.REDIS_URL);
 
-// Very simple processing - just take the first video and create a short clip
-async function processVideoBasic(
+// Process videos based on beat markers - creates segments from each video
+async function processVideoWithBeats(
   inputVideos: VideoInput[],
   beatMarkers: number[],
   outputPath: string,
   options: ProcessingOptions
 ): Promise<string> {
   return new Promise((resolve, reject) => {
-    console.log('Using basic processing method');
+    console.log('Processing video with beats');
+    console.log(`Videos: ${inputVideos.length}, Beats: ${beatMarkers.length}`);
     
-    if (inputVideos.length === 0) {
-      reject(new Error('No input videos provided'));
+    if (inputVideos.length === 0 || beatMarkers.length === 0) {
+      reject(new Error('No input videos or beat markers provided'));
       return;
     }
 
-    // Use the first video only
-    const firstVideo = inputVideos[0];
-    const startTime = beatMarkers[0] || 0;
-    const duration = Math.min(10, (beatMarkers[1] || 10) - startTime); // Max 10 seconds
+    // Create segments based on beat markers
+    const segments: Array<{video: VideoInput, startTime: number, duration: number}> = [];
+    
+    for (let i = 0; i < beatMarkers.length - 1; i++) {
+      const videoIndex = i % inputVideos.length; // Cycle through videos
+      const startTime = beatMarkers[i];
+      const endTime = beatMarkers[i + 1];
+      const duration = endTime - startTime;
+      
+      segments.push({
+        video: inputVideos[videoIndex],
+        startTime: 0, // Start from beginning of each video clip
+        duration: duration
+      });
+    }
 
-    console.log(`Basic processing: ${firstVideo.url} from ${startTime}s for ${duration}s`);
+    console.log(`Created ${segments.length} segments`);
 
-    const videoQuality = options.quality === 'low' ? '30' : '25';
+    // For preview, limit segments
+    const segmentsToProcess = options.quality === 'low' 
+      ? segments.slice(0, Math.min(3, segments.length))
+      : segments;
 
-    ffmpeg(firstVideo.url)
-      .seekInput(startTime)
-      .duration(duration)
-      .videoCodec('libx264')
-      .audioCodec('aac')
-      .size('640x480') // Fixed small size for testing
-      .outputOptions([
-        '-crf', videoQuality,
-        '-preset', 'ultrafast',
-        '-tune', 'fastdecode',
-        '-movflags', '+faststart',
-        '-avoid_negative_ts', 'make_zero'
-      ])
-      .output(outputPath)
-      .on('start', (commandLine) => {
-        console.log('Basic FFmpeg command:', commandLine);
-      })
-      .on('progress', (progress) => {
-        console.log(`Basic processing: ${progress.percent || 0}% done, frames: ${progress.frames}`);
-      })
-      .on('end', () => {
-        console.log('Basic video processing completed');
-        resolve(outputPath);
-      })
-      .on('error', (error) => {
-        console.error('Basic FFmpeg error:', error);
-        reject(error);
-      })
-      .run();
+    // Create temporary files for each segment
+    const tempDir = path.dirname(outputPath);
+    const segmentPaths: string[] = [];
+
+    // Process each segment
+    Promise.all(segmentsToProcess.map((segment, index) => {
+      return new Promise<string>((segResolve, segReject) => {
+        const segmentPath = path.join(tempDir, `segment_${index}.mp4`);
+        segmentPaths.push(segmentPath);
+
+        const videoQuality = options.quality === 'low' ? '28' : '23';
+        const resolution = options.resolution === '720p' ? '1280x720' : '1920x1080';
+
+        ffmpeg(segment.video.url)
+          .seekInput(segment.startTime)
+          .duration(segment.duration)
+          .videoCodec('libx264')
+          .audioCodec('aac')
+          .size(resolution)
+          .outputOptions([
+            '-crf', videoQuality,
+            '-preset', options.quality === 'low' ? 'ultrafast' : 'fast',
+            '-movflags', '+faststart',
+            '-avoid_negative_ts', 'make_zero'
+          ])
+          .output(segmentPath)
+          .on('end', () => {
+            console.log(`Segment ${index} completed`);
+            segResolve(segmentPath);
+          })
+          .on('error', (error) => {
+            console.error(`Segment ${index} failed:`, error);
+            segReject(error);
+          })
+          .run();
+      });
+    }))
+    .then(() => {
+      // Concatenate all segments
+      console.log('Concatenating segments...');
+      
+      const concatCommand = ffmpeg();
+      
+      // Add all segment inputs
+      segmentPaths.forEach(segPath => {
+        concatCommand.input(segPath);
+      });
+
+      // Create filter complex for concatenation
+      const inputs = segmentPaths.map((_, i) => `[${i}:v][${i}:a]`).join('');
+      const filterComplex = `${inputs}concat=n=${segmentPaths.length}:v=1:a=1[outv][outa]`;
+
+      concatCommand
+        .complexFilter(filterComplex)
+        .outputOptions([
+          '-map', '[outv]',
+          '-map', '[outa]',
+          '-c:v', 'libx264',
+          '-c:a', 'aac',
+          '-preset', options.quality === 'low' ? 'ultrafast' : 'fast'
+        ])
+        .output(outputPath)
+        .on('start', (commandLine) => {
+          console.log('Concat command:', commandLine);
+        })
+        .on('end', async () => {
+          console.log('Concatenation completed');
+          
+          // Clean up temporary segment files
+          for (const segPath of segmentPaths) {
+            try {
+              await fs.unlink(segPath);
+            } catch (error) {
+              console.error(`Failed to delete segment: ${segPath}`);
+            }
+          }
+          
+          resolve(outputPath);
+        })
+        .on('error', (error) => {
+          console.error('Concatenation error:', error);
+          reject(error);
+        })
+        .run();
+    })
+    .catch(reject);
   });
 }
 
@@ -100,7 +172,7 @@ previewQueue.process('create-preview', async (job) => {
     console.log('Output path:', outputPath);
 
     // Use basic processing for preview
-    await processVideoBasic(
+    await processVideoWithBeats(
       inputVideos,
       beatMarkers,
       outputPath,
@@ -179,7 +251,7 @@ exportQueue.process('process-video', async (job) => {
     const outputPath = path.join(outputDir, `${projectId}.mp4`);
 
     // Use basic processing for export too
-    await processVideoBasic(
+    await processVideoWithBeats(
       inputVideos,
       project.beatMarkers,
       outputPath,

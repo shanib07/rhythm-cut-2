@@ -17,9 +17,9 @@ export const VideoEditor: React.FC = () => {
     audioUrl,
     audioBuffer,
     addClip,
-    removeClip,
-    addBeat,
-    removeBeat,
+    removeClip: storeRemoveClip,
+    addBeat: storeAddBeat,
+    removeBeat: storeRemoveBeat,
     addTimelineSegment,
     removeTimelineSegment,
     setCurrentClip,
@@ -42,33 +42,55 @@ export const VideoEditor: React.FC = () => {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [exportUrl, setExportUrl] = useState<string | null>(null);
 
-  // Sort beats and add 0 if not present
+  const handleAddBeat = () => {
+    const time = parseFloat(newBeatTime);
+    if (!isNaN(time) && time >= 0) {
+      const newBeat: BeatMarker = {
+        id: generateUniqueId(),
+        time
+      };
+      storeAddBeat(newBeat);
+      setNewBeatTime('');
+    }
+  };
+
   const sortedBeats = useMemo(() => {
-    const allBeats = beats.some(b => b.time === 0) 
-      ? [...beats] 
-      : [{ id: 'start', time: 0 }, ...beats];
-    return allBeats.sort((a, b) => a.time - b.time);
+    const startBeat: BeatMarker = { id: 'start', time: 0 };
+    return [startBeat, ...beats].sort((a, b) => a.time - b.time);
   }, [beats]);
 
-  // Calculate video segments based on beats and clips
   const videoSegments = useMemo(() => {
-    if (!clips.length || !sortedBeats.length) return [];
+    if (clips.length === 0 || sortedBeats.length < 2) return [];
 
-    return clips.map((clip, index) => {
-      const startBeat = sortedBeats[index];
-      const endBeat = sortedBeats[index + 1];
+    const segments = [];
+    for (let i = 0; i < sortedBeats.length - 1; i++) {
+      const clipIndex = i % clips.length;
+      const clip = clips[clipIndex];
       
-      if (!startBeat) return null;
-
-      return {
+      segments.push({
         clipId: clip.id,
-        startTime: startBeat.time,
-        endTime: endBeat ? endBeat.time : startBeat.time + clip.duration,
+        startTime: sortedBeats[i].time,
+        endTime: sortedBeats[i + 1].time,
         videoStartTime: 0,
-        videoEndTime: endBeat ? endBeat.time - startBeat.time : clip.duration
-      };
-    }).filter(Boolean);
+        videoEndTime: clip.duration
+      });
+    }
+    return segments;
   }, [clips, sortedBeats]);
+
+  const currentVideoClip = useMemo(() => {
+    if (clips.length === 0) return null;
+    
+    const currentSegment = videoSegments.find(
+      segment => currentTime >= segment.startTime && currentTime < segment.endTime
+    );
+    
+    if (currentSegment) {
+      return clips.find(clip => clip.id === currentSegment.clipId) || null;
+    }
+    
+    return clips[0];
+  }, [clips, videoSegments, currentTime]);
 
   // Initialize audio element
   useEffect(() => {
@@ -215,221 +237,6 @@ export const VideoEditor: React.FC = () => {
     accept: { 'video/*': [] },
     multiple: true
   });
-
-  // Beat management
-  const handleAddBeat = useCallback(() => {
-    if (!newBeatTime.trim()) return;
-    
-    try {
-      const seconds = parseFloat(newBeatTime);
-      
-      if (isNaN(seconds) || seconds < 0) {
-        toast.error('Please enter a valid positive number');
-        return;
-      }
-      
-      // Check if this time is already used
-      if (beats.some(b => b.time === seconds)) {
-        toast.error('Beat time already exists');
-        return;
-      }
-
-      const newBeat: BeatMarker = {
-        id: generateUniqueId(),
-        time: seconds
-      };
-      addBeat(newBeat);
-      setNewBeatTime(''); // Clear input after adding
-
-      // If we have more videos than segments, automatically assign the next video
-      if (clips.length > timeline.length) {
-        const clipToAssign = clips[timeline.length];
-        const beatIndex = beats.length; // New beat will be at this index after adding
-        
-        const startTime = beatIndex === 0 ? 0 : seconds;
-        const endTime = seconds + clipToAssign.duration;
-
-        const newSegment: TimelineSegment = {
-          id: generateUniqueId(),
-          clipId: clipToAssign.id,
-          beatStart: startTime,
-          beatEnd: endTime,
-          clipStartTime: 0,
-          clipEndTime: clipToAssign.duration
-        };
-        addTimelineSegment(newSegment);
-      }
-    } catch (error) {
-      toast.error('Invalid time format');
-    }
-  }, [newBeatTime, addBeat, clips, timeline, addTimelineSegment, beats]);
-
-  const currentVideoClip = currentClip ? clips.find(c => c.id === currentClip) : null;
-
-  const exportVideo = async () => {
-    if (!clips.length || !sortedBeats.length || !videoSegments.length) {
-      toast.error('Please add videos and beat markers before exporting');
-      return;
-    }
-
-    if (!audioUrl) {
-      toast.error('Please upload an audio file before exporting');
-      return;
-    }
-
-    setIsExporting(true);
-    try {
-      const canvas = canvasRef.current;
-      const ctx = canvas?.getContext('2d');
-      if (!canvas || !ctx) {
-        throw new Error('Canvas not available');
-      }
-
-      // Create an audio context
-      const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
-      const audioDestination = audioContext.createMediaStreamDestination();
-
-      // Load and connect the audio file
-      const audioResponse = await fetch(audioUrl);
-      const audioArrayBuffer = await audioResponse.arrayBuffer();
-      const audioBuffer = await audioContext.decodeAudioData(audioArrayBuffer);
-      
-      // Create audio source from the buffer
-      const audioSource = audioContext.createBufferSource();
-      audioSource.buffer = audioBuffer;
-      audioSource.connect(audioDestination);
-      
-      // Set canvas size to match the first video's dimensions
-      const firstClip = clips[0];
-      const video = document.createElement('video');
-      video.src = firstClip.url;
-      await new Promise((resolve) => {
-        video.onloadedmetadata = () => {
-          canvas.width = video.videoWidth;
-          canvas.height = video.videoHeight;
-          resolve(null);
-        };
-      });
-
-      // Create a combined video+audio stream
-      const canvasStream = canvas.captureStream(60);
-      const combinedStream = new MediaStream([
-        ...canvasStream.getVideoTracks(),
-        ...audioDestination.stream.getAudioTracks()
-      ]);
-
-      // Try to use MP4 with H.264, fallback to other formats if not supported
-      const mimeTypes = [
-        'video/mp4;codecs=h264,aac',
-        'video/mp4;codecs=h264,mp3',
-        'video/mp4',
-        'video/webm;codecs=h264,opus',
-        'video/webm;codecs=vp9,opus',
-        'video/webm'
-      ];
-
-      let selectedMimeType = mimeTypes.find(type => MediaRecorder.isTypeSupported(type));
-      if (!selectedMimeType) {
-        throw new Error('No supported video codec found');
-      }
-
-      const mediaRecorder = new MediaRecorder(combinedStream, {
-        mimeType: selectedMimeType,
-        videoBitsPerSecond: 8000000 // 8 Mbps
-      });
-
-      mediaRecorderRef.current = mediaRecorder;
-      recordedChunksRef.current = [];
-
-      mediaRecorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          recordedChunksRef.current.push(event.data);
-        }
-      };
-
-      mediaRecorder.onstop = async () => {
-        const chunks = recordedChunksRef.current;
-        const blob = new Blob(chunks, { type: selectedMimeType });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = 'edited-video.mp4';
-        a.click();
-        URL.revokeObjectURL(url);
-        
-        // Clean up audio context
-        await audioContext.close();
-        
-        setIsExporting(false);
-        toast.success('Video export completed with audio!');
-      };
-
-      // Start recording with smaller timeslice for more frequent ondataavailable events
-      mediaRecorder.start(1000);
-
-      // Start audio playback
-      audioSource.start(0);
-
-      // Process each segment with precise timing
-      for (const segment of videoSegments) {
-        if (!segment) continue;
-
-        const clip = clips.find(c => c.id === segment.clipId);
-        if (!clip) continue;
-
-        const video = document.createElement('video');
-        video.src = clip.url;
-        video.muted = true; // Ensure video is muted
-        
-        await new Promise<void>((resolve) => {
-          video.onloadeddata = async () => {
-            video.currentTime = segment.videoStartTime;
-            
-            const segmentDuration = segment.endTime - segment.startTime;
-            const startTime = performance.now();
-            const frameInterval = 1000 / 60; // 60 FPS
-            
-            const processFrame = async () => {
-              const elapsed = (performance.now() - startTime) / 1000;
-              if (elapsed >= segmentDuration) {
-                resolve();
-                return;
-              }
-
-              // Calculate the current time within the video
-              const videoTime = segment.videoStartTime + elapsed;
-              if (videoTime <= segment.videoEndTime) {
-                video.currentTime = videoTime;
-                
-                // Clear canvas before drawing new frame
-                ctx.clearRect(0, 0, canvas.width, canvas.height);
-                
-                // Draw video frame
-                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-              }
-
-              // Schedule next frame with precise timing
-              setTimeout(() => requestAnimationFrame(processFrame), frameInterval);
-            };
-
-            // Start video playback
-            await video.play();
-            processFrame();
-          };
-        });
-
-        // Small pause between segments to ensure clean transitions
-        await new Promise(resolve => setTimeout(resolve, 50));
-      }
-
-      // Stop recording after all segments are processed
-      mediaRecorder.stop();
-    } catch (error) {
-      console.error('Error exporting video:', error);
-      toast.error('Failed to export video');
-      setIsExporting(false);
-    }
-  };
 
   const handlePreview = async () => {
     setIsPreviewMode(true);
@@ -628,7 +435,7 @@ export const VideoEditor: React.FC = () => {
                     </span>
                   </div>
                   <button
-                    onClick={() => removeClip(clip.id)}
+                    onClick={() => storeRemoveClip(clip.id)}
                     className="p-1 text-gray-500 hover:text-red-500"
                   >
                     <Trash2 size={16} />
@@ -641,29 +448,6 @@ export const VideoEditor: React.FC = () => {
 
         {/* Right panel */}
         <div className="col-span-4 space-y-4">
-          {/* Export button */}
-          <button
-            onClick={exportVideo}
-            disabled={isExporting || !clips.length || !beats.length}
-            className={`w-full flex items-center justify-center gap-2 px-4 py-3 rounded-lg
-              ${isExporting || !clips.length || !beats.length
-                ? 'bg-gray-200 text-gray-500 cursor-not-allowed'
-                : 'bg-[#06B6D4] text-white hover:bg-[#0891B2]'
-              }`}
-          >
-            {isExporting ? (
-              <>
-                <Loader2 className="w-5 h-5 animate-spin" />
-                Exporting...
-              </>
-            ) : (
-              <>
-                <Download className="w-5 h-5" />
-                Export Video
-              </>
-            )}
-          </button>
-
           {/* Beat Markers */}
           <div className="bg-gray-50 p-4 rounded-lg">
             <h3 className="text-black font-semibold mb-3" style={{ color: 'black' }}>Beat Markers (in seconds)</h3>
@@ -691,7 +475,7 @@ export const VideoEditor: React.FC = () => {
                   <span className="text-black" style={{ color: 'black' }}>{beat.time.toFixed(2)}s</span>
                   {beat.id !== 'start' && (
                     <button
-                      onClick={() => removeBeat(beat.id)}
+                      onClick={() => storeRemoveBeat(beat.id)}
                       className="p-1 text-gray-500 hover:text-red-500"
                     >
                       <Trash2 size={16} />

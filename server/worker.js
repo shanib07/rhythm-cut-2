@@ -10,46 +10,117 @@ const prisma = new PrismaClient();
 const videoQueue = new Queue('video-processing', process.env.REDIS_URL);
 
 // Process videos based on beat markers
-async function processVideo(inputVideos, beatMarkers, outputPath) {
+async function processVideoWithBeats(inputVideos, beatMarkers, outputPath) {
   return new Promise((resolve, reject) => {
-    if (!inputVideos || inputVideos.length === 0) {
-      reject(new Error('No input videos provided'));
+    console.log('Processing video with beats');
+    console.log(`Videos: ${inputVideos.length}, Beats: ${beatMarkers.length}`);
+    
+    if (!inputVideos || inputVideos.length === 0 || !beatMarkers || beatMarkers.length === 0) {
+      reject(new Error('No input videos or beat markers provided'));
       return;
     }
 
-    // For simplicity, use only the first video for now
-    const firstVideo = inputVideos[0];
-    const duration = beatMarkers.length > 1 ? beatMarkers[1] - beatMarkers[0] : 10;
+    // Create segments based on beat markers
+    const segments = [];
+    
+    for (let i = 0; i < beatMarkers.length - 1; i++) {
+      const videoIndex = i % inputVideos.length; // Cycle through videos
+      const startTime = beatMarkers[i];
+      const endTime = beatMarkers[i + 1];
+      const duration = endTime - startTime;
+      
+      segments.push({
+        video: inputVideos[videoIndex],
+        startTime: 0, // Start from beginning of each video clip
+        duration: duration
+      });
+    }
 
-    console.log(`Processing video: ${firstVideo.url}`);
-    console.log(`Duration: ${duration} seconds`);
+    console.log(`Created ${segments.length} segments`);
 
-    ffmpeg(firstVideo.url)
-      .seekInput(beatMarkers[0] || 0)
-      .duration(duration)
-      .videoCodec('libx264')
-      .audioCodec('aac')
-      .outputOptions([
-        '-preset', 'fast',
-        '-crf', '23',
-        '-movflags', '+faststart'
-      ])
-      .output(outputPath)
-      .on('start', (commandLine) => {
-        console.log('FFmpeg command:', commandLine);
-      })
-      .on('progress', (progress) => {
-        console.log(`Processing: ${progress.percent || 0}% done`);
-      })
-      .on('end', () => {
-        console.log('Video processing completed');
-        resolve(outputPath);
-      })
-      .on('error', (error) => {
-        console.error('FFmpeg error:', error);
-        reject(error);
-      })
-      .run();
+    // Create temporary files for each segment
+    const tempDir = path.dirname(outputPath);
+    const segmentPaths = [];
+
+    // Process each segment
+    Promise.all(segments.map((segment, index) => {
+      return new Promise((segResolve, segReject) => {
+        const segmentPath = path.join(tempDir, `segment_${index}.mp4`);
+        segmentPaths.push(segmentPath);
+
+        ffmpeg(segment.video.url)
+          .seekInput(segment.startTime)
+          .duration(segment.duration)
+          .videoCodec('libx264')
+          .audioCodec('aac')
+          .size('1280x720')
+          .outputOptions([
+            '-crf', '23',
+            '-preset', 'fast',
+            '-movflags', '+faststart',
+            '-avoid_negative_ts', 'make_zero'
+          ])
+          .output(segmentPath)
+          .on('end', () => {
+            console.log(`Segment ${index} completed`);
+            segResolve(segmentPath);
+          })
+          .on('error', (error) => {
+            console.error(`Segment ${index} failed:`, error);
+            segReject(error);
+          })
+          .run();
+      });
+    }))
+    .then(() => {
+      // Concatenate all segments
+      console.log('Concatenating segments...');
+      
+      const concatCommand = ffmpeg();
+      
+      // Add all segment inputs
+      segmentPaths.forEach(segPath => {
+        concatCommand.input(segPath);
+      });
+
+      // Create filter complex for concatenation
+      const inputs = segmentPaths.map((_, i) => `[${i}:v][${i}:a]`).join('');
+      const filterComplex = `${inputs}concat=n=${segmentPaths.length}:v=1:a=1[outv][outa]`;
+
+      concatCommand
+        .complexFilter(filterComplex)
+        .outputOptions([
+          '-map', '[outv]',
+          '-map', '[outa]',
+          '-c:v', 'libx264',
+          '-c:a', 'aac',
+          '-preset', 'fast'
+        ])
+        .output(outputPath)
+        .on('start', (commandLine) => {
+          console.log('Concat command:', commandLine);
+        })
+        .on('end', async () => {
+          console.log('Concatenation completed');
+          
+          // Clean up temporary segment files
+          for (const segPath of segmentPaths) {
+            try {
+              await fs.unlink(segPath);
+            } catch (error) {
+              console.error(`Failed to delete segment: ${segPath}`);
+            }
+          }
+          
+          resolve(outputPath);
+        })
+        .on('error', (error) => {
+          console.error('Concatenation error:', error);
+          reject(error);
+        })
+        .run();
+    })
+    .catch(reject);
   });
 }
 
@@ -87,7 +158,7 @@ videoQueue.process('process-video', async (job) => {
     const outputPath = path.join(outputDir, `${projectId}.mp4`);
 
     // Process the video
-    await processVideo(project.inputVideos, project.beatMarkers, outputPath);
+    await processVideoWithBeats(project.inputVideos, project.beatMarkers, outputPath);
 
     // For now, serve the file directly
     // In production, upload to cloud storage
