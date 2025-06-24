@@ -5,12 +5,18 @@ import Queue from 'bull';
 const previewQueue = new Queue('video-preview', process.env.REDIS_URL!);
 const exportQueue = new Queue('video-processing', process.env.REDIS_URL!);
 
+type RouteContext = {
+  params: {
+    jobId: string;
+  };
+};
+
 export async function GET(
-  request: Request,
-  context: { params: { jobId: string } }
+  request: NextRequest,
+  { params }: RouteContext
 ) {
   try {
-    const { jobId } = context.params;
+    const { jobId } = params;
     
     if (!jobId) {
       return NextResponse.json(

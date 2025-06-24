@@ -27,7 +27,7 @@ ENV NEXT_TELEMETRY_DISABLED 1
 ENV NODE_ENV production
 
 # Build the application with error handling
-RUN npm run build || (cat .next/error.log && exit 1)
+RUN npm run build || (echo "Build failed. Check the error above." && exit 1)
 
 # Expose the port the app runs on
 EXPOSE 3000
