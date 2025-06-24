@@ -68,45 +68,62 @@ async function processVideoWithBeats(
     const tempDir = path.dirname(outputPath);
     const segmentPaths: string[] = [];
 
-    // Process each segment
-    Promise.all(segmentsToProcess.map((segment, index) => {
-      return new Promise<string>((segResolve, segReject) => {
-        const segmentPath = path.join(tempDir, `segment_${index}.mp4`);
-        segmentPaths.push(segmentPath);
+    // Process segments with limited concurrency
+    const processSegmentBatch = async (segments: typeof segmentsToProcess, batchSize = 2): Promise<string[]> => {
+      const results: string[] = [];
+      for (let i = 0; i < segments.length; i += batchSize) {
+        const batch = segments.slice(i, i + batchSize);
+        const batchResults = await Promise.all(
+          batch.map((segment, batchIndex) => {
+            const index = i + batchIndex;
+            return new Promise<string>((segResolve, segReject) => {
+              const segmentPath = path.join(tempDir, `segment_${index}.mp4`);
+              segmentPaths.push(segmentPath);
 
-        const videoQuality = options.quality === 'low' ? '28' : '23';
-        const resolution = options.resolution === '720p' ? '1280x720' : '1920x1080';
+              const videoQuality = options.quality === 'low' ? '28' : '23';
+              const resolution = options.resolution === '720p' ? '1280x720' : '1920x1080';
 
-        // Convert relative URL to absolute file path if needed
-        let videoPath = segment.video.url;
-        if (videoPath.startsWith('/uploads/')) {
-          videoPath = path.join(process.cwd(), 'public', segment.video.url);
-        }
+              // Convert relative URL to absolute file path if needed
+              let videoPath = segment.video.url;
+              if (videoPath.startsWith('/uploads/')) {
+                videoPath = path.join(process.cwd(), 'public', segment.video.url);
+              }
 
-        ffmpeg(videoPath)
-          .seekInput(segment.startTime)
-          .duration(segment.duration)
-          .videoCodec('libx264')
-          .audioCodec('aac')
-          .size(resolution)
-          .outputOptions([
-            '-crf', videoQuality,
-            '-preset', options.quality === 'low' ? 'ultrafast' : 'fast',
-            '-movflags', '+faststart',
-            '-avoid_negative_ts', 'make_zero'
-          ])
-          .output(segmentPath)
-          .on('end', () => {
-            console.log(`Segment ${index} completed`);
-            segResolve(segmentPath);
+              ffmpeg(videoPath)
+                .seekInput(segment.startTime)
+                .duration(segment.duration)
+                .videoCodec('libx264')
+                .audioCodec('aac')
+                .size(resolution)
+                .outputOptions([
+                  '-crf', videoQuality,
+                  '-preset', options.quality === 'low' ? 'ultrafast' : 'fast',
+                  '-movflags', '+faststart',
+                  '-avoid_negative_ts', 'make_zero'
+                ])
+                .output(segmentPath)
+                .on('end', () => {
+                  console.log(`Segment ${index} completed`);
+                  segResolve(segmentPath);
+                })
+                .on('error', (error) => {
+                  console.error(`Segment ${index} failed:`, error);
+                  segReject(error);
+                })
+                .run();
+            });
           })
-          .on('error', (error) => {
-            console.error(`Segment ${index} failed:`, error);
-            segReject(error);
-          })
-          .run();
-      });
-    }))
+        );
+        results.push(...batchResults);
+        
+        // Log progress after each batch
+        const progress = Math.round(((i + batch.length) / segments.length) * 70); // 70% for segment processing
+        console.log(`Segment processing progress: ${progress}%`);
+      }
+      return results;
+    };
+
+    await processSegmentBatch(segmentsToProcess)
     .then(() => {
       // Concatenate all segments
       console.log('Concatenating segments...');
@@ -170,12 +187,17 @@ previewQueue.process('create-preview', async (job) => {
       beatMarkers: beatMarkers?.slice(0, 3) // Log first 3 beat markers
     });
     
+    // Report initial progress
+    job.progress(0);
+    
     // Create temp output directory
     const outputDir = path.join(__dirname, '../tmp/previews');
     await fs.mkdir(outputDir, { recursive: true });
     
     const outputPath = path.join(outputDir, `preview-${job.id}.mp4`);
     console.log('Output path:', outputPath);
+    
+    job.progress(10);
 
     // Use basic processing for preview
     await processVideoWithBeats(
@@ -188,6 +210,7 @@ previewQueue.process('create-preview', async (job) => {
       }
     );
 
+    job.progress(90);
     console.log('Preview generation completed for job:', job.id);
     
     // Check if file was created
@@ -199,6 +222,7 @@ previewQueue.process('create-preview', async (job) => {
       throw new Error('Output file was not created');
     }
 
+    job.progress(100);
     return { success: true, previewUrl: outputPath };
 
   } catch (error) {
@@ -214,11 +238,16 @@ exportQueue.process('process-video', async (job) => {
   try {
     console.log('Starting export for project:', projectId);
     
+    // Report initial progress
+    job.progress(0);
+    
     // Update project status
     await prisma.project.update({
       where: { id: projectId },
       data: { status: 'processing' }
     });
+    
+    job.progress(10);
 
     // Get project details
     const project = await prisma.project.findUnique({
@@ -256,6 +285,8 @@ exportQueue.process('process-video', async (job) => {
     
     const outputPath = path.join(outputDir, `${projectId}.mp4`);
 
+    job.progress(20);
+
     // Use basic processing for export too
     await processVideoWithBeats(
       inputVideos,
@@ -266,6 +297,8 @@ exportQueue.process('process-video', async (job) => {
         resolution: '1080p'
       }
     );
+    
+    job.progress(90);
 
     console.log('Export completed for project:', projectId);
 
@@ -290,6 +323,7 @@ exportQueue.process('process-video', async (job) => {
       }
     });
 
+    job.progress(100);
     return { success: true, outputUrl };
 
   } catch (error) {

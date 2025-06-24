@@ -42,42 +42,59 @@ async function processVideoWithBeats(inputVideos, beatMarkers, outputPath) {
     const tempDir = path.dirname(outputPath);
     const segmentPaths = [];
 
-    // Process each segment
-    Promise.all(segments.map((segment, index) => {
-      return new Promise((segResolve, segReject) => {
-        const segmentPath = path.join(tempDir, `segment_${index}.mp4`);
-        segmentPaths.push(segmentPath);
+    // Process segments with limited concurrency and progress reporting
+    const processSegmentBatch = async (segments, batchSize = 2) => {
+      const results = [];
+      for (let i = 0; i < segments.length; i += batchSize) {
+        const batch = segments.slice(i, i + batchSize);
+        const batchResults = await Promise.all(
+          batch.map((segment, batchIndex) => {
+            const index = i + batchIndex;
+            return new Promise((segResolve, segReject) => {
+              const segmentPath = path.join(tempDir, `segment_${index}.mp4`);
+              segmentPaths.push(segmentPath);
 
-        // Convert relative URL to absolute file path if needed
-        let videoPath = segment.video.url;
-        if (videoPath.startsWith('/uploads/')) {
-          videoPath = path.join(process.cwd(), 'public', segment.video.url);
-        }
+              // Convert relative URL to absolute file path if needed
+              let videoPath = segment.video.url;
+              if (videoPath.startsWith('/uploads/')) {
+                videoPath = path.join(process.cwd(), 'public', segment.video.url);
+              }
 
-        ffmpeg(videoPath)
-          .seekInput(segment.startTime)
-          .duration(segment.duration)
-          .videoCodec('libx264')
-          .audioCodec('aac')
-          .size('1280x720')
-          .outputOptions([
-            '-crf', '23',
-            '-preset', 'fast',
-            '-movflags', '+faststart',
-            '-avoid_negative_ts', 'make_zero'
-          ])
-          .output(segmentPath)
-          .on('end', () => {
-            console.log(`Segment ${index} completed`);
-            segResolve(segmentPath);
+              ffmpeg(videoPath)
+                .seekInput(segment.startTime)
+                .duration(segment.duration)
+                .videoCodec('libx264')
+                .audioCodec('aac')
+                .size('1280x720')
+                .outputOptions([
+                  '-crf', '23',
+                  '-preset', 'fast',
+                  '-movflags', '+faststart',
+                  '-avoid_negative_ts', 'make_zero'
+                ])
+                .output(segmentPath)
+                .on('end', () => {
+                  console.log(`Segment ${index} completed`);
+                  segResolve(segmentPath);
+                })
+                .on('error', (error) => {
+                  console.error(`Segment ${index} failed:`, error);
+                  segReject(error);
+                })
+                .run();
+            });
           })
-          .on('error', (error) => {
-            console.error(`Segment ${index} failed:`, error);
-            segReject(error);
-          })
-          .run();
-      });
-    }))
+        );
+        results.push(...batchResults);
+        
+        // Update progress after each batch
+        const progress = Math.round(((i + batch.length) / segments.length) * 70); // 70% for segment processing
+        console.log(`Segment processing progress: ${progress}%`);
+      }
+      return results;
+    };
+
+    await processSegmentBatch(segments)
     .then(() => {
       // Concatenate all segments
       console.log('Concatenating segments...');
@@ -137,11 +154,16 @@ videoQueue.process('process-video', async (job) => {
   try {
     console.log(`Starting video processing for project: ${projectId}`);
     
+    // Report initial progress
+    job.progress(0);
+    
     // Update project status
     await prisma.project.update({
       where: { id: projectId },
       data: { status: 'processing' }
     });
+    
+    job.progress(10);
 
     // Get project details
     const project = await prisma.project.findUnique({
@@ -163,8 +185,12 @@ videoQueue.process('process-video', async (job) => {
     
     const outputPath = path.join(outputDir, `${projectId}.mp4`);
 
+    job.progress(20);
+
     // Process the video
     await processVideoWithBeats(project.inputVideos, project.beatMarkers, outputPath);
+    
+    job.progress(90);
 
     // For now, serve the file directly
     // In production, upload to cloud storage
@@ -179,6 +205,7 @@ videoQueue.process('process-video', async (job) => {
       }
     });
 
+    job.progress(100);
     console.log(`Video processing completed for project: ${projectId}`);
     return { success: true, outputUrl };
 
