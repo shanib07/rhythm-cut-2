@@ -1,13 +1,17 @@
 'use client';
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Music, Video, Play, Pause, AlertCircle, Volume2, Activity, Clock, Timer, ZoomIn, ZoomOut, RefreshCw, Download, ChevronDown, ChevronUp, FileAudio } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { useSession } from 'next-auth/react';
+import { Music, Video, Play, Pause, AlertCircle, Volume2, Activity, Clock, Timer, ZoomIn, ZoomOut, RefreshCw, Download, ChevronDown, ChevronUp, FileAudio, ArrowLeft, Info, Share2, BarChart3, Loader2 } from 'lucide-react';
 import { AudioAnalyzer } from '@/src/services/AudioAnalyzer';
 import { WaveformVisualizer } from '@/src/components/WaveformVisualizer';
-import { ImprovedVideoEditor } from '@/src/components/ImprovedVideoEditor';
+import { VideoEditor } from '@/src/components/VideoEditor';
+import { FFmpegVideoEditor } from '@/src/components/FFmpegVideoEditor';
+import { toast } from 'sonner';
+import { motion } from 'framer-motion';
 import { useVideoStore } from '@/src/stores/videoStore';
 import { generateUniqueId } from '@/src/utils/videoUtils';
-import { toast } from 'sonner';
 
 interface OnsetData {
   timestamp: number;
@@ -362,7 +366,7 @@ export default function EditPage() {
         </div>
 
         {/* Improved Video Editor Section */}
-        <ImprovedVideoEditor />
+        <VideoEditor />
       </div>
     </div>
   );
