@@ -37,3 +37,6 @@ next-env.d.ts
 # Temporary files
 /tmp
 /server/tmp
+
+# Uploaded files
+/public/uploads

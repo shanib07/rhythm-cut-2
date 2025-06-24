@@ -238,20 +238,46 @@ export const VideoEditor: React.FC = () => {
     multiple: true
   });
 
+  // Upload video files to server
+  const uploadVideoFile = async (file: File): Promise<string> => {
+    const formData = new FormData();
+    formData.append('file', file);
+    
+    const response = await fetch('/api/upload', {
+      method: 'POST',
+      body: formData
+    });
+    
+    if (!response.ok) {
+      throw new Error('Failed to upload file');
+    }
+    
+    const data = await response.json();
+    return data.url;
+  };
+
   const handlePreview = async () => {
     setIsPreviewMode(true);
     setIsProcessing(true);
     try {
+      // Upload video files first
+      const uploadedVideos = await Promise.all(
+        clips.map(async (clip) => {
+          const serverUrl = await uploadVideoFile(clip.file);
+          return {
+            id: clip.id,
+            url: serverUrl,
+            duration: clip.duration
+          };
+        })
+      );
+
       // Create a preview of the edited video
       const response = await fetch('/api/preview', {
         method: 'POST',
         body: JSON.stringify({
           name: 'Preview',
-          inputVideos: clips.map(clip => ({
-            id: clip.id,
-            url: clip.url,
-            duration: clip.duration
-          })),
+          inputVideos: uploadedVideos,
           beatMarkers: sortedBeats.map(beat => beat.time)
         }),
         headers: {
@@ -296,15 +322,23 @@ export const VideoEditor: React.FC = () => {
   const handleExport = async () => {
     setIsProcessing(true);
     try {
+      // Upload video files first
+      const uploadedVideos = await Promise.all(
+        clips.map(async (clip) => {
+          const serverUrl = await uploadVideoFile(clip.file);
+          return {
+            id: clip.id,
+            url: serverUrl,
+            duration: clip.duration
+          };
+        })
+      );
+
       const response = await fetch('/api/process', {
         method: 'POST',
         body: JSON.stringify({
           name: 'Export',
-          inputVideos: clips.map(clip => ({
-            id: clip.id,
-            url: clip.url,
-            duration: clip.duration
-          })),
+          inputVideos: uploadedVideos,
           beatMarkers: sortedBeats.map(beat => beat.time)
         }),
         headers: {

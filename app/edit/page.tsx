@@ -7,7 +7,6 @@ import { Music, Video, Play, Pause, AlertCircle, Volume2, Activity, Clock, Timer
 import { AudioAnalyzer } from '@/src/services/AudioAnalyzer';
 import { WaveformVisualizer } from '@/src/components/WaveformVisualizer';
 import { VideoEditor } from '@/src/components/VideoEditor';
-import { FFmpegVideoEditor } from '@/src/components/FFmpegVideoEditor';
 import { toast } from 'sonner';
 import { motion } from 'framer-motion';
 import { useVideoStore } from '@/src/stores/videoStore';

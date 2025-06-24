@@ -77,7 +77,13 @@ async function processVideoWithBeats(
         const videoQuality = options.quality === 'low' ? '28' : '23';
         const resolution = options.resolution === '720p' ? '1280x720' : '1920x1080';
 
-        ffmpeg(segment.video.url)
+        // Convert relative URL to absolute file path if needed
+        let videoPath = segment.video.url;
+        if (videoPath.startsWith('/uploads/')) {
+          videoPath = path.join(process.cwd(), 'public', segment.video.url);
+        }
+
+        ffmpeg(videoPath)
           .seekInput(segment.startTime)
           .duration(segment.duration)
           .videoCodec('libx264')

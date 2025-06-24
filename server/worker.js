@@ -48,7 +48,13 @@ async function processVideoWithBeats(inputVideos, beatMarkers, outputPath) {
         const segmentPath = path.join(tempDir, `segment_${index}.mp4`);
         segmentPaths.push(segmentPath);
 
-        ffmpeg(segment.video.url)
+        // Convert relative URL to absolute file path if needed
+        let videoPath = segment.video.url;
+        if (videoPath.startsWith('/uploads/')) {
+          videoPath = path.join(process.cwd(), 'public', segment.video.url);
+        }
+
+        ffmpeg(videoPath)
           .seekInput(segment.startTime)
           .duration(segment.duration)
           .videoCodec('libx264')
