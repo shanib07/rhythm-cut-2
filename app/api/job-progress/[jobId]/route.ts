@@ -6,11 +6,11 @@ const previewQueue = new Queue('video-preview', process.env.REDIS_URL!);
 const exportQueue = new Queue('video-processing', process.env.REDIS_URL!);
 
 export async function GET(
-  request: NextRequest,
-  { params }: { params: { jobId: string } }
+  request: Request,
+  context: { params: { jobId: string } }
 ) {
   try {
-    const { jobId } = params;
+    const { jobId } = context.params;
     
     if (!jobId) {
       return NextResponse.json(
