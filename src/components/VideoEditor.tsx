@@ -41,8 +41,6 @@ export const VideoEditor: React.FC = () => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [exportUrl, setExportUrl] = useState<string | null>(null);
-  const [processingProgress, setProcessingProgress] = useState(0);
-  const [processingStatus, setProcessingStatus] = useState('');
 
   const handleAddBeat = () => {
     const time = parseFloat(newBeatTime);
@@ -258,49 +256,11 @@ export const VideoEditor: React.FC = () => {
     return data.url;
   };
 
-  const pollJobProgress = async (jobId: string, onComplete: (result: any) => void) => {
-    const checkJobStatus = async () => {
-      try {
-        const statusResponse = await fetch(`/api/job-progress/${jobId}`);
-        const statusData = await statusResponse.json();
-
-        if (statusResponse.ok) {
-          // Update progress
-          setProcessingProgress(statusData.progress || 0);
-          setProcessingStatus(statusData.state || 'processing');
-
-          if (statusData.state === 'completed') {
-            onComplete(statusData);
-            setIsProcessing(false);
-            setProcessingProgress(100);
-          } else if (statusData.state === 'failed') {
-            throw new Error(statusData.failedReason || 'Processing failed');
-          } else {
-            // Continue polling
-            setTimeout(checkJobStatus, 1000);
-          }
-        } else {
-          throw new Error('Failed to get job status');
-        }
-      } catch (error) {
-        console.error('Status check failed:', error);
-        setIsProcessing(false);
-        throw error;
-      }
-    };
-
-    checkJobStatus();
-  };
-
   const handlePreview = async () => {
     setIsPreviewMode(true);
     setIsProcessing(true);
-    setProcessingProgress(0);
-    setProcessingStatus('Starting preview...');
-    
     try {
       // Upload video files first
-      setProcessingStatus('Uploading videos...');
       const uploadedVideos = await Promise.all(
         clips.map(async (clip) => {
           const serverUrl = await uploadVideoFile(clip.file);
@@ -313,7 +273,6 @@ export const VideoEditor: React.FC = () => {
       );
 
       // Create a preview of the edited video
-      setProcessingStatus('Creating preview...');
       const response = await fetch('/api/preview', {
         method: 'POST',
         body: JSON.stringify({
@@ -328,15 +287,28 @@ export const VideoEditor: React.FC = () => {
 
       const data = await response.json();
       if (data.success && data.jobId) {
-        // Poll for job completion with progress updates
-        pollJobProgress(data.jobId, async (result) => {
-          // For preview, we need to get the URL from the server
-          const previewResponse = await fetch(`/api/preview-url/${data.jobId}`);
-          const blob = await previewResponse.blob();
-          const url = URL.createObjectURL(blob);
-          setPreviewUrl(url);
-          setProcessingStatus('Preview ready!');
-        });
+        // Poll for job completion
+        const checkJobStatus = async () => {
+          const statusResponse = await fetch(`/api/status/${data.jobId}`);
+          const statusData = await statusResponse.json();
+
+          if (statusData.state === 'completed') {
+            // For preview, we need to get the URL from the server
+            const previewResponse = await fetch(`/api/preview-url/${data.jobId}`);
+            const blob = await previewResponse.blob();
+            const url = URL.createObjectURL(blob);
+            setPreviewUrl(url);
+            setIsProcessing(false);
+          } else if (statusData.state === 'failed') {
+            throw new Error('Preview generation failed');
+          } else {
+            // Continue polling
+            setTimeout(checkJobStatus, 1000);
+          }
+        };
+
+        // Start polling
+        checkJobStatus();
       } else {
         throw new Error(data.error || 'Preview generation failed');
       }
@@ -344,18 +316,13 @@ export const VideoEditor: React.FC = () => {
       console.error('Preview failed:', error);
       toast.error('Failed to generate preview');
       setIsProcessing(false);
-      setProcessingStatus('');
     }
   };
 
   const handleExport = async () => {
     setIsProcessing(true);
-    setProcessingProgress(0);
-    setProcessingStatus('Starting export...');
-    
     try {
       // Upload video files first
-      setProcessingStatus('Uploading videos...');
       const uploadedVideos = await Promise.all(
         clips.map(async (clip) => {
           const serverUrl = await uploadVideoFile(clip.file);
@@ -367,7 +334,6 @@ export const VideoEditor: React.FC = () => {
         })
       );
 
-      setProcessingStatus('Processing video...');
       const response = await fetch('/api/process', {
         method: 'POST',
         body: JSON.stringify({
@@ -382,20 +348,25 @@ export const VideoEditor: React.FC = () => {
 
       const data = await response.json();
       if (data.success && data.projectId) {
-        // Poll for project completion with progress updates
-        pollJobProgress(data.projectId, async (result) => {
-          setExportUrl(result.data.outputUrl);
-          toast.success('Video exported successfully!');
-          setProcessingStatus('Export ready!');
-          
-          // Trigger download automatically
-          const downloadLink = document.createElement('a');
-          downloadLink.href = `/api/download/${data.projectId}`;
-          downloadLink.download = 'exported-video.mp4';
-          document.body.appendChild(downloadLink);
-          downloadLink.click();
-          document.body.removeChild(downloadLink);
-        });
+        // Poll for project completion
+        const checkProjectStatus = async () => {
+          const project = await fetch(`/api/project/${data.projectId}`);
+          const projectData = await project.json();
+
+          if (projectData.status === 'completed' && projectData.outputUrl) {
+            setExportUrl(projectData.outputUrl);
+            toast.success('Video exported successfully!');
+            setIsProcessing(false);
+          } else if (projectData.status === 'error') {
+            throw new Error('Export failed');
+          } else {
+            // Continue polling
+            setTimeout(checkProjectStatus, 1000);
+          }
+        };
+
+        // Start polling
+        checkProjectStatus();
       } else {
         throw new Error(data.error || 'Export failed');
       }
@@ -403,7 +374,6 @@ export const VideoEditor: React.FC = () => {
       console.error('Export failed:', error);
       toast.error('Failed to export video');
       setIsProcessing(false);
-      setProcessingStatus('');
     }
   };
 
@@ -638,23 +608,13 @@ export const VideoEditor: React.FC = () => {
           {isProcessing && isPreviewMode ? (
             <>
               <Loader2 className="w-5 h-5 animate-spin" />
-              {processingStatus} ({processingProgress}%)
+              Generating Preview...
             </>
           ) : (
             <>
               <Play className="w-5 h-5" />
               Preview
             </>
-          )}
-          
-          {/* Progress Bar */}
-          {isProcessing && isPreviewMode && (
-            <div className="absolute bottom-0 left-0 right-0 h-1 bg-gray-200">
-              <div 
-                className="h-full bg-blue-500 transition-all duration-300"
-                style={{ width: `${processingProgress}%` }}
-              />
-            </div>
           )}
         </button>
 
@@ -670,23 +630,13 @@ export const VideoEditor: React.FC = () => {
           {isProcessing && !isPreviewMode ? (
             <>
               <Loader2 className="w-5 h-5 animate-spin" />
-              {processingStatus} ({processingProgress}%)
+              Exporting...
             </>
           ) : (
             <>
               <Download className="w-5 h-5" />
               Export
             </>
-          )}
-          
-          {/* Progress Bar */}
-          {isProcessing && !isPreviewMode && (
-            <div className="absolute bottom-0 left-0 right-0 h-1 bg-gray-200">
-              <div 
-                className="h-full bg-green-500 transition-all duration-300"
-                style={{ width: `${processingProgress}%` }}
-              />
-            </div>
           )}
         </button>
       </div>
