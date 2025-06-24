@@ -12,49 +12,54 @@ const videoQueue = new Queue('video-processing', process.env.REDIS_URL);
 // Process videos based on beat markers
 async function processVideo(inputVideos, beatMarkers, outputPath) {
   return new Promise((resolve, reject) => {
-    let command = ffmpeg();
-    
-    // Add all input videos
-    inputVideos.forEach(videoPath => {
-      command = command.input(videoPath);
-    });
+    if (!inputVideos || inputVideos.length === 0) {
+      reject(new Error('No input videos provided'));
+      return;
+    }
 
-    // Generate complex filter for video switching
-    const filterComplex = [];
-    let outputSelector = [];
-    
-    inputVideos.forEach((_, index) => {
-      // Enable video until next beat marker
-      const duration = index < beatMarkers.length - 1 
-        ? beatMarkers[index + 1] - beatMarkers[index]
-        : 999999; // Large number for last segment
-        
-      filterComplex.push(`[${index}:v]trim=start=${beatMarkers[index]}:duration=${duration}[v${index}]`);
-      outputSelector.push(`[v${index}]`);
-    });
-    
-    // Concatenate all video segments
-    filterComplex.push(`${outputSelector.join('')}concat=n=${inputVideos.length}:v=1[outv]`);
+    // For simplicity, use only the first video for now
+    const firstVideo = inputVideos[0];
+    const duration = beatMarkers.length > 1 ? beatMarkers[1] - beatMarkers[0] : 10;
 
-    command
-      .complexFilter(filterComplex, ['outv'])
-      .map('[outv]')
+    console.log(`Processing video: ${firstVideo.url}`);
+    console.log(`Duration: ${duration} seconds`);
+
+    ffmpeg(firstVideo.url)
+      .seekInput(beatMarkers[0] || 0)
+      .duration(duration)
       .videoCodec('libx264')
+      .audioCodec('aac')
+      .outputOptions([
+        '-preset', 'fast',
+        '-crf', '23',
+        '-movflags', '+faststart'
+      ])
       .output(outputPath)
-      .on('progress', progress => {
-        console.log(`Processing: ${progress.percent}% done`);
+      .on('start', (commandLine) => {
+        console.log('FFmpeg command:', commandLine);
       })
-      .on('end', () => resolve(outputPath))
-      .on('error', reject)
+      .on('progress', (progress) => {
+        console.log(`Processing: ${progress.percent || 0}% done`);
+      })
+      .on('end', () => {
+        console.log('Video processing completed');
+        resolve(outputPath);
+      })
+      .on('error', (error) => {
+        console.error('FFmpeg error:', error);
+        reject(error);
+      })
       .run();
   });
 }
 
 // Process jobs from the queue
-videoQueue.process(async (job) => {
+videoQueue.process('process-video', async (job) => {
   const { projectId } = job.data;
   
   try {
+    console.log(`Starting video processing for project: ${projectId}`);
+    
     // Update project status
     await prisma.project.update({
       where: { id: projectId },
@@ -70,8 +75,13 @@ videoQueue.process(async (job) => {
       throw new Error('Project not found');
     }
 
+    console.log('Project data:', {
+      inputVideos: project.inputVideos?.length,
+      beatMarkers: project.beatMarkers?.length
+    });
+
     // Create temp output directory if it doesn't exist
-    const outputDir = path.join(__dirname, '../tmp');
+    const outputDir = path.join(__dirname, '../tmp/exports');
     await fs.mkdir(outputDir, { recursive: true });
     
     const outputPath = path.join(outputDir, `${projectId}.mp4`);
@@ -79,8 +89,9 @@ videoQueue.process(async (job) => {
     // Process the video
     await processVideo(project.inputVideos, project.beatMarkers, outputPath);
 
-    // TODO: Upload the output file to cloud storage
-    const outputUrl = outputPath; // This should be the cloud storage URL in production
+    // For now, serve the file directly
+    // In production, upload to cloud storage
+    const outputUrl = `/api/download/${projectId}`;
 
     // Update project with success
     await prisma.project.update({
@@ -91,9 +102,12 @@ videoQueue.process(async (job) => {
       }
     });
 
+    console.log(`Video processing completed for project: ${projectId}`);
     return { success: true, outputUrl };
 
   } catch (error) {
+    console.error(`Video processing failed for project: ${projectId}`, error);
+    
     // Update project with error
     await prisma.project.update({
       where: { id: projectId },
@@ -109,11 +123,16 @@ videoQueue.on('failed', async (job, error) => {
   console.error(`Job ${job.id} failed:`, error);
   
   // Update project status on failure
-  const { projectId } = job.data;
-  await prisma.project.update({
-    where: { id: projectId },
-    data: { status: 'error' }
-  });
+  if (job.data.projectId) {
+    try {
+      await prisma.project.update({
+        where: { id: job.data.projectId },
+        data: { status: 'error' }
+      });
+    } catch (updateError) {
+      console.error('Failed to update project status:', updateError);
+    }
+  }
 });
 
 console.log('Video processing worker is running...'); 

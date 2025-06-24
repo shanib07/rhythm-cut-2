@@ -436,11 +436,6 @@ export const VideoEditor: React.FC = () => {
     setIsProcessing(true);
     try {
       // Create a preview of the edited video
-      const formData = new FormData();
-      clips.forEach((clip, index) => {
-        formData.append(`video${index}`, clip.file);
-      });
-
       const response = await fetch('/api/preview', {
         method: 'POST',
         body: JSON.stringify({
@@ -458,15 +453,35 @@ export const VideoEditor: React.FC = () => {
       });
 
       const data = await response.json();
-      if (data.success) {
-        setPreviewUrl(data.previewUrl);
+      if (data.success && data.jobId) {
+        // Poll for job completion
+        const checkJobStatus = async () => {
+          const statusResponse = await fetch(`/api/status/${data.jobId}`);
+          const statusData = await statusResponse.json();
+
+          if (statusData.state === 'completed') {
+            // For preview, we need to get the URL from the server
+            const previewResponse = await fetch(`/api/preview-url/${data.jobId}`);
+            const blob = await previewResponse.blob();
+            const url = URL.createObjectURL(blob);
+            setPreviewUrl(url);
+            setIsProcessing(false);
+          } else if (statusData.state === 'failed') {
+            throw new Error('Preview generation failed');
+          } else {
+            // Continue polling
+            setTimeout(checkJobStatus, 1000);
+          }
+        };
+
+        // Start polling
+        checkJobStatus();
       } else {
         throw new Error(data.error || 'Preview generation failed');
       }
     } catch (error) {
       console.error('Preview failed:', error);
       toast.error('Failed to generate preview');
-    } finally {
       setIsProcessing(false);
     }
   };
@@ -491,16 +506,32 @@ export const VideoEditor: React.FC = () => {
       });
 
       const data = await response.json();
-      if (data.success) {
-        setExportUrl(data.outputUrl);
-        toast.success('Video exported successfully!');
+      if (data.success && data.projectId) {
+        // Poll for project completion
+        const checkProjectStatus = async () => {
+          const project = await fetch(`/api/project/${data.projectId}`);
+          const projectData = await project.json();
+
+          if (projectData.status === 'completed' && projectData.outputUrl) {
+            setExportUrl(projectData.outputUrl);
+            toast.success('Video exported successfully!');
+            setIsProcessing(false);
+          } else if (projectData.status === 'error') {
+            throw new Error('Export failed');
+          } else {
+            // Continue polling
+            setTimeout(checkProjectStatus, 1000);
+          }
+        };
+
+        // Start polling
+        checkProjectStatus();
       } else {
         throw new Error(data.error || 'Export failed');
       }
     } catch (error) {
       console.error('Export failed:', error);
       toast.error('Failed to export video');
-    } finally {
       setIsProcessing(false);
     }
   };
