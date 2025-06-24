@@ -10,8 +10,7 @@ if (!process.env.REDIS_URL) {
 const previewQueue = new Queue('video-preview', process.env.REDIS_URL);
 
 export async function GET(
-  request: Request,
-  { params }: { params: { jobId: string } }
+  request: Request
 ): Promise<Response> {
   try {
     const url = new URL(request.url);

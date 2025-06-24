@@ -7,8 +7,7 @@ import fs from 'fs/promises';
 const prisma = new PrismaClient();
 
 export async function GET(
-  request: Request,
-  { params }: { params: { projectId: string } }
+  request: Request
 ): Promise<Response> {
   try {
     const url = new URL(request.url);
