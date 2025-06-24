@@ -5,9 +5,10 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start",
-    "lint": "next lint",
-    "worker": "node server/worker.js"
+    "start": "node server/start.js",
+    "start:app": "next start",
+    "start:worker": "node server/worker.js",
+    "lint": "next lint"
   },
   "dependencies": {
     "@auth/prisma-adapter": "^2.10.0",
