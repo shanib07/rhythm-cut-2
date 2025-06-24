@@ -37,7 +37,9 @@ export const VideoEditor: React.FC = () => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const recordedChunksRef = useRef<Blob[]>([]);
+  const [isPreviewMode, setIsPreviewMode] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [exportUrl, setExportUrl] = useState<string | null>(null);
 
   const handleAddBeat = () => {
@@ -254,6 +256,69 @@ export const VideoEditor: React.FC = () => {
     return data.url;
   };
 
+  const handlePreview = async () => {
+    setIsPreviewMode(true);
+    setIsProcessing(true);
+    try {
+      // Upload video files first
+      const uploadedVideos = await Promise.all(
+        clips.map(async (clip) => {
+          const serverUrl = await uploadVideoFile(clip.file);
+          return {
+            id: clip.id,
+            url: serverUrl,
+            duration: clip.duration
+          };
+        })
+      );
+
+      // Create a preview of the edited video
+      const response = await fetch('/api/preview', {
+        method: 'POST',
+        body: JSON.stringify({
+          name: 'Preview',
+          inputVideos: uploadedVideos,
+          beatMarkers: sortedBeats.map(beat => beat.time)
+        }),
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      });
+
+      const data = await response.json();
+      if (data.success && data.jobId) {
+        // Poll for job completion
+        const checkJobStatus = async () => {
+          const statusResponse = await fetch(`/api/status/${data.jobId}`);
+          const statusData = await statusResponse.json();
+
+          if (statusData.state === 'completed') {
+            // For preview, we need to get the URL from the server
+            const previewResponse = await fetch(`/api/preview-url/${data.jobId}`);
+            const blob = await previewResponse.blob();
+            const url = URL.createObjectURL(blob);
+            setPreviewUrl(url);
+            setIsProcessing(false);
+          } else if (statusData.state === 'failed') {
+            throw new Error('Preview generation failed');
+          } else {
+            // Continue polling
+            setTimeout(checkJobStatus, 1000);
+          }
+        };
+
+        // Start polling
+        checkJobStatus();
+      } else {
+        throw new Error(data.error || 'Preview generation failed');
+      }
+    } catch (error) {
+      console.error('Preview failed:', error);
+      toast.error('Failed to generate preview');
+      setIsProcessing(false);
+    }
+  };
+
   const handleExport = async () => {
     setIsProcessing(true);
     try {
@@ -289,14 +354,6 @@ export const VideoEditor: React.FC = () => {
           const projectData = await project.json();
 
           if (projectData.status === 'completed' && projectData.outputUrl) {
-            // Trigger download immediately
-            const downloadLink = document.createElement('a');
-            downloadLink.href = projectData.outputUrl;
-            downloadLink.download = `rhythm-cut-${data.projectId}.mp4`;
-            document.body.appendChild(downloadLink);
-            downloadLink.click();
-            document.body.removeChild(downloadLink);
-            
             setExportUrl(projectData.outputUrl);
             toast.success('Video exported successfully!');
             setIsProcessing(false);
@@ -511,26 +568,74 @@ export const VideoEditor: React.FC = () => {
         </div>
       </div>
 
-      {/* Export Button */}
+      {/* Preview Modal */}
+      {previewUrl && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-8 z-50">
+          <div className="bg-white rounded-lg p-4 w-full max-w-4xl">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-xl font-semibold text-gray-900">Preview</h3>
+              <button
+                onClick={() => {
+                  setPreviewUrl(null);
+                  setIsPreviewMode(false);
+                }}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                <X size={24} />
+              </button>
+            </div>
+            <video
+              src={previewUrl}
+              controls
+              className="w-full rounded-lg"
+              autoPlay
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Action Buttons */}
       <div className="flex gap-4 mt-6">
+        <button
+          onClick={handlePreview}
+          disabled={isProcessing || clips.length === 0 || sortedBeats.length === 0}
+          className={`flex-1 flex items-center justify-center gap-2 px-6 py-3 rounded-lg
+            ${isProcessing || clips.length === 0 || sortedBeats.length === 0
+              ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+              : 'bg-blue-500 text-white hover:bg-blue-600'
+            }`}
+        >
+          {isProcessing && isPreviewMode ? (
+            <>
+              <Loader2 className="w-5 h-5 animate-spin" />
+              Generating Preview...
+            </>
+          ) : (
+            <>
+              <Play className="w-5 h-5" />
+              Preview
+            </>
+          )}
+        </button>
+
         <button
           onClick={handleExport}
           disabled={isProcessing || clips.length === 0 || sortedBeats.length === 0}
-          className={`w-full flex items-center justify-center gap-2 px-6 py-3 rounded-lg
+          className={`flex-1 flex items-center justify-center gap-2 px-6 py-3 rounded-lg
             ${isProcessing || clips.length === 0 || sortedBeats.length === 0
               ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
               : 'bg-green-500 text-white hover:bg-green-600'
             }`}
         >
-          {isProcessing ? (
+          {isProcessing && !isPreviewMode ? (
             <>
               <Loader2 className="w-5 h-5 animate-spin" />
-              Processing & Exporting...
+              Exporting...
             </>
           ) : (
             <>
               <Download className="w-5 h-5" />
-              Export Video
+              Export
             </>
           )}
         </button>
