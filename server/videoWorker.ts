@@ -279,7 +279,7 @@ exportQueue.process('process-video', async (job) => {
     }
 
     // TODO: Upload to cloud storage in production
-    const outputUrl = outputPath;
+    const outputUrl = `/api/download/${projectId}`;
 
     // Update project with success
     await prisma.project.update({
