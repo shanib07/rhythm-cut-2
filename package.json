@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "prisma generate && next build",
     "start": "node server/start.js",
     "start:app": "next start",
     "start:worker": "node server/worker.js",
@@ -52,5 +52,8 @@
     "prisma": "^5.10.0",
     "tailwindcss": "^4",
     "typescript": "^5"
+  },
+  "engines": {
+    "node": ">=20.0.0"
   }
 }
