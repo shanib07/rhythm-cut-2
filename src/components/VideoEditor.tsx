@@ -7,6 +7,7 @@ import { generateUniqueId } from '../utils/videoUtils';
 import { VideoClip, BeatMarker, TimelineSegment } from '../types';
 import { toast } from 'sonner';
 import { ProgressBar } from './ProgressBar';
+import { uploadVideoFile, getVideoMetadata, processVideoWithBeats } from '../utils/ffmpeg';
 
 export const VideoEditor: React.FC = () => {
   const {
@@ -35,9 +36,6 @@ export const VideoEditor: React.FC = () => {
   const [currentVideoIndex, setCurrentVideoIndex] = useState(0);
   const [isTransitioning, setIsTransitioning] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const recordedChunksRef = useRef<Blob[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
   const [exportUrl, setExportUrl] = useState<string | null>(null);
   const [exportProgress, setExportProgress] = useState({
@@ -204,34 +202,33 @@ export const VideoEditor: React.FC = () => {
       for (const file of acceptedFiles) {
         if (file.type.startsWith('video/')) {
           const clipId = generateUniqueId();
-          const url = URL.createObjectURL(file);
           
-          const video = document.createElement('video');
-          video.src = url;
+          // Get metadata for the video
+          const metadata = await getVideoMetadata(file);
           
-          await new Promise((resolve) => {
-            video.onloadedmetadata = () => {
-              const newClip: VideoClip = {
-                id: clipId,
-                file,
-                url,
-                duration: video.duration,
-                name: file.name
-              };
-              addClip(newClip);
-              
-              if (clips.length === 0) {
-                setCurrentClip(clipId);
-                setCurrentVideoIndex(0);
-              }
-
-              resolve(null);
-            };
-          });
+          // For preview, we'll still use blob URL
+          // Server processing will happen during export
+          const previewUrl = URL.createObjectURL(file);
+          
+          const newClip: VideoClip = {
+            id: clipId,
+            file,
+            url: previewUrl,
+            duration: metadata.duration,
+            name: file.name
+          };
+          addClip(newClip);
+          
+          if (clips.length === 0) {
+            setCurrentClip(clipId);
+            setCurrentVideoIndex(0);
+          }
         }
       }
+      toast.success('Videos loaded for preview. Server processing will happen during export.');
     } catch (error) {
       console.error('Error loading videos:', error);
+      toast.error('Failed to load videos');
     } finally {
       setLoading(false);
     }
@@ -243,27 +240,17 @@ export const VideoEditor: React.FC = () => {
     multiple: true
   });
 
-  // Upload video files to server
-  const uploadVideoFile = async (file: File): Promise<string> => {
-    const formData = new FormData();
-    formData.append('file', file);
-    
-    const response = await fetch('/api/upload', {
-      method: 'POST',
-      body: formData
-    });
-    
-    if (!response.ok) {
-      throw new Error('Failed to upload file');
-    }
-    
-    const data = await response.json();
-    return data.url;
-  };
-
-
-
   const handleExport = async () => {
+    if (clips.length === 0) {
+      toast.error('Please add some video clips first');
+      return;
+    }
+
+    if (sortedBeats.length < 2) {
+      toast.error('Please add at least one beat marker');
+      return;
+    }
+
     setIsProcessing(true);
     setExportProgress({
       status: 'uploading',
@@ -273,115 +260,68 @@ export const VideoEditor: React.FC = () => {
     });
 
     try {
-      // Upload video files with progress tracking
-      const uploadedVideos = [];
-      for (let i = 0; i < clips.length; i++) {
-        const clip = clips[i];
-        setExportProgress(prev => ({
-          ...prev,
-          progress: Math.round((i / clips.length) * 5), // Upload takes up to 5%
-          message: `Uploading video ${i + 1} of ${clips.length}...`
-        }));
-        
-        const serverUrl = await uploadVideoFile(clip.file);
-        uploadedVideos.push({
-          id: clip.id,
-          url: serverUrl,
-          duration: clip.duration
-        });
-      }
+      // Prepare videos for server processing
+      const videosForProcessing = clips.map(clip => ({
+        file: clip.file,
+        id: clip.id
+      }));
+
+      const beatMarkers = sortedBeats.map(beat => beat.time);
 
       setExportProgress(prev => ({
         ...prev,
-        progress: 5,
-        message: 'Starting video processing...'
+        message: 'Starting server-side processing...'
       }));
 
-      const response = await fetch('/api/process', {
-        method: 'POST',
-        body: JSON.stringify({
-          name: 'Export',
-          inputVideos: uploadedVideos,
-          beatMarkers: sortedBeats.map(beat => beat.time)
-        }),
-        headers: {
-          'Content-Type': 'application/json'
+      // Use the server-side processing function
+      const outputUrl = await processVideoWithBeats(
+        videosForProcessing,
+        beatMarkers,
+        `Rhythm Cut Export - ${new Date().toISOString()}`,
+        (progress) => {
+          setExportProgress(prev => ({
+            ...prev,
+            progress: Math.round(progress * 100),
+            status: 'processing',
+            message: `Processing video... ${Math.round(progress * 100)}%`
+          }));
         }
+      );
+
+      setExportUrl(outputUrl);
+      setExportProgress({
+        status: 'completed',
+        progress: 100,
+        message: 'Export completed successfully!',
+        projectId: null
       });
 
-      const data = await response.json();
-      if (data.success && data.projectId) {
-        setExportProgress(prev => ({
-          ...prev,
-          projectId: data.projectId,
-          status: 'processing',
-          progress: 10,
-          message: 'Processing video...'
-        }));
+      toast.success('Video exported successfully!');
 
-        // Poll for project progress
-        const checkProjectProgress = async () => {
-          try {
-            const progressResponse = await fetch(`/api/progress/${data.projectId}`);
-            const progressData = await progressResponse.json();
+      // Automatically trigger download
+      const downloadLink = document.createElement('a');
+      downloadLink.href = outputUrl;
+      downloadLink.download = `rhythm-cut-${Date.now()}.mp4`;
+      document.body.appendChild(downloadLink);
+      downloadLink.click();
+      document.body.removeChild(downloadLink);
 
-            setExportProgress(prev => ({
-              ...prev,
-              status: progressData.status,
-              progress: progressData.progress || prev.progress,
-              message: progressData.message || prev.message
-            }));
-
-            if (progressData.status === 'completed' && progressData.outputUrl) {
-              setExportUrl(progressData.outputUrl);
-              toast.success('Video exported successfully!');
-              setIsProcessing(false);
-              
-              // Automatically trigger download
-              const downloadLink = document.createElement('a');
-              downloadLink.href = progressData.outputUrl;
-              downloadLink.download = `rhythm-cut-${Date.now()}.mp4`;
-              document.body.appendChild(downloadLink);
-              downloadLink.click();
-              document.body.removeChild(downloadLink);
-            } else if (progressData.status === 'error') {
-              throw new Error('Export failed');
-            } else {
-              // Continue polling
-              setTimeout(checkProjectProgress, 500); // Poll every 500ms for smoother updates
-            }
-          } catch (progressError) {
-            console.error('Progress check failed:', progressError);
-            setTimeout(checkProjectProgress, 1000); // Fall back to slower polling on error
-          }
-        };
-
-        // Start progress polling
-        checkProjectProgress();
-      } else {
-        throw new Error(data.error || 'Export failed');
-      }
     } catch (error) {
       console.error('Export failed:', error);
-      toast.error('Failed to export video');
-      setIsProcessing(false);
-      setExportProgress(prev => ({
-        ...prev,
+      toast.error(`Export failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      setExportProgress({
         status: 'error',
-        message: 'Export failed. Please try again.'
-      }));
+        progress: 0,
+        message: 'Export failed. Please try again.',
+        projectId: null
+      });
+    } finally {
+      setIsProcessing(false);
     }
   };
 
   return (
     <div className="flex flex-col h-full gap-6 p-6 bg-gradient-to-b from-navy-900 to-blue-950 rounded-lg shadow-lg">
-      {/* Hidden canvas for video export */}
-      <canvas 
-        ref={canvasRef}
-        className="hidden"
-        style={{ position: 'absolute', left: '-9999px' }}
-      />
-      
       {/* Main content area */}
       <div className="grid grid-cols-12 gap-6">
         {/* Left panel - Video upload and preview */}
@@ -444,6 +384,9 @@ export const VideoEditor: React.FC = () => {
                         ? 'Drop the videos here...'
                         : 'Drag & drop videos, or click to select'}
                     </p>
+                    <p className="text-sm text-gray-500">
+                      Videos will be processed on our servers for optimal performance
+                    </p>
                   </>
                 )}
               </div>
@@ -462,6 +405,9 @@ export const VideoEditor: React.FC = () => {
                   <div className="flex items-center gap-2">
                     <span className="text-black font-medium" style={{ color: 'black' }}>
                       {index + 1}. {clip.name}
+                    </span>
+                    <span className="text-gray-500 text-sm">
+                      ({clip.duration.toFixed(1)}s)
                     </span>
                   </div>
                   <button
@@ -498,17 +444,14 @@ export const VideoEditor: React.FC = () => {
             </div>
             <div className="space-y-2 max-h-48 overflow-y-auto">
               {sortedBeats.map((beat) => (
-                <div
-                  key={beat.id}
-                  className="flex items-center justify-between bg-white p-2 rounded-lg border border-gray-200"
-                >
-                  <span className="text-black" style={{ color: 'black' }}>{beat.time.toFixed(2)}s</span>
+                <div key={beat.id} className="flex items-center justify-between bg-white p-2 rounded border">
+                  <span className="text-black font-mono">{beat.time.toFixed(2)}s</span>
                   {beat.id !== 'start' && (
                     <button
                       onClick={() => storeRemoveBeat(beat.id)}
-                      className="p-1 text-gray-500 hover:text-red-500"
+                      className="text-red-500 hover:text-red-700"
                     >
-                      <Trash2 size={16} />
+                      <X size={16} />
                     </button>
                   )}
                 </div>
@@ -516,107 +459,47 @@ export const VideoEditor: React.FC = () => {
             </div>
           </div>
 
-          {/* Current Segment Info */}
+          {/* Export Section */}
           <div className="bg-gray-50 p-4 rounded-lg">
-            <h3 className="text-black font-semibold mb-3" style={{ color: 'black' }}>Current Segment Info</h3>
-            {videoSegments.map((segment, index) => {
-              const clip = clips.find(c => c.id === segment?.clipId);
-              if (!segment || !clip) return null;
-
-              return (
-                <div key={index} className="mb-4 bg-white p-3 rounded-lg border border-gray-200">
-                  <h4 className="text-black font-medium mb-2" style={{ color: 'black' }}>Video {index + 1}</h4>
-                  <div className="space-y-1">
-                    <p className="text-black" style={{ color: 'black' }}>Start: {segment.startTime.toFixed(2)}s</p>
-                    <p className="text-black" style={{ color: 'black' }}>End: {segment.endTime.toFixed(2)}s</p>
-                    <p className="text-black" style={{ color: 'black' }}>Duration: {(segment.endTime - segment.startTime).toFixed(2)}s</p>
-                  </div>
+            <h3 className="text-black font-semibold mb-3" style={{ color: 'black' }}>Export Video</h3>
+            
+            {isProcessing ? (
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-gray-600">{exportProgress.message}</span>
+                  <span className="text-sm font-medium">{exportProgress.progress}%</span>
                 </div>
-              );
-            })}
-          </div>
-
-          {/* Timeline */}
-          <div className="bg-gray-50 p-4 rounded-lg">
-            <h3 className="text-black font-semibold mb-3" style={{ color: 'black' }}>Timeline</h3>
-            <div className="relative h-20 bg-white rounded-lg border border-gray-200">
-              {videoSegments.map((segment, index) => {
-                if (!segment) return null;
-                const totalDuration = sortedBeats[sortedBeats.length - 1]?.time || 1;
-                const width = ((segment.endTime - segment.startTime) / totalDuration) * 100;
-                const left = (segment.startTime / totalDuration) * 100;
-
-                return (
-                  <div
-                    key={index}
-                    className="absolute h-full bg-[#E5F7FA] border-r border-[#06B6D4] flex items-center justify-center"
-                    style={{
-                      left: `${left}%`,
-                      width: `${width}%`
-                    }}
-                  >
-                    <span className="text-black text-sm" style={{ color: 'black' }}>{index + 1}</span>
-                  </div>
-                );
-              })}
-            </div>
+                                 <div className="w-full h-2 bg-gray-200 rounded-full overflow-hidden">
+                   <div
+                     className="h-full bg-[#06B6D4] rounded-full transition-all duration-300"
+                     style={{ width: `${exportProgress.progress}%` }}
+                   />
+                 </div>
+                <p className="text-xs text-gray-500">
+                  Server-side processing ensures high quality and performance
+                </p>
+              </div>
+            ) : (
+              <button
+                onClick={handleExport}
+                disabled={clips.length === 0 || sortedBeats.length < 2}
+                className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-[#06B6D4] text-white rounded-lg hover:bg-[#0891B2] disabled:opacity-50 disabled:hover:bg-[#06B6D4]"
+              >
+                <Download size={20} />
+                Export Video
+              </button>
+            )}
+            
+            {exportUrl && (
+              <div className="mt-3 p-2 bg-green-100 border border-green-300 rounded">
+                <p className="text-sm text-green-700">
+                  Export completed! Download should start automatically.
+                </p>
+              </div>
+            )}
           </div>
         </div>
       </div>
-
-
-
-      {/* Export Button */}
-      <div className="flex justify-center mt-6">
-        <button
-          onClick={handleExport}
-          disabled={isProcessing || clips.length === 0 || sortedBeats.length === 0}
-          className={`flex items-center justify-center gap-2 px-8 py-3 rounded-lg min-w-[200px]
-            ${isProcessing || clips.length === 0 || sortedBeats.length === 0
-              ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
-              : 'bg-green-500 text-white hover:bg-green-600'
-            }`}
-        >
-          {isProcessing ? (
-            <>
-              <Loader2 className="w-5 h-5 animate-spin" />
-              Exporting...
-            </>
-          ) : (
-            <>
-              <Download className="w-5 h-5" />
-              Export Video
-            </>
-          )}
-        </button>
-      </div>
-
-      {/* Export Progress */}
-      {isProcessing && exportProgress.status !== 'idle' && (
-        <ProgressBar
-          status={exportProgress.status}
-          progress={exportProgress.progress}
-          message={exportProgress.message}
-          className="mt-4"
-        />
-      )}
-
-      {/* Export URL - fallback download button */}
-      {exportUrl && !isProcessing && (
-        <div className="mt-4 p-4 bg-white/10 rounded-lg">
-          <div className="flex items-center justify-between">
-            <span className="text-green-400">Export complete!</span>
-            <a
-              href={exportUrl}
-              download
-              className="flex items-center gap-2 px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600"
-            >
-              <Download className="w-4 h-4" />
-              Download Video
-            </a>
-          </div>
-        </div>
-      )}
     </div>
   );
 }; 

@@ -1,4 +1,4 @@
-import { processVideo, generateThumbnail } from './ffmpeg';
+import { uploadVideoFile, getVideoMetadata, processVideoWithBeats } from './ffmpeg';
 
 const CHUNK_SIZE = 1024 * 1024 * 10; // 10MB chunks
 const THUMBNAIL_INTERVAL = 5; // Generate thumbnail every 5 seconds
@@ -17,35 +17,29 @@ interface ThumbnailResult {
 
 /**
  * Progressive video loader that handles large files in chunks
+ * For server-side processing, we can handle larger files directly
  */
 export async function loadVideoProgressively(
   file: File,
   onProgress?: (progress: number) => void
 ): Promise<VideoChunk[]> {
-  const chunks: VideoChunk[] = [];
-  const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+  // For server-side processing, we don't need to chunk files
+  // This function is kept for compatibility but now just loads the entire file
+  onProgress?.(0.5);
   
-  for (let i = 0; i < totalChunks; i++) {
-    const start = i * CHUNK_SIZE;
-    const end = Math.min(start + CHUNK_SIZE, file.size);
-    
-    const chunk = file.slice(start, end);
-    const buffer = await chunk.arrayBuffer();
-    
-    chunks.push({
-      start,
-      end,
-      data: new Uint8Array(buffer)
-    });
-    
-    onProgress?.((i + 1) / totalChunks);
-  }
+  const buffer = await file.arrayBuffer();
+  const chunks: VideoChunk[] = [{
+    start: 0,
+    end: file.size,
+    data: new Uint8Array(buffer)
+  }];
   
+  onProgress?.(1);
   return chunks;
 }
 
 /**
- * Generate optimized thumbnails for video preview
+ * Generate optimized thumbnails using server-side processing
  */
 export async function generateThumbnails(
   file: File,
@@ -61,20 +55,41 @@ export async function generateThumbnails(
       (_, i) => i * interval
     );
     
-    // Generate thumbnails in parallel with resource limits
+    // Generate thumbnails using server API
     const batchSize = 2; // Process 2 thumbnails at a time
     for (let i = 0; i < times.length; i += batchSize) {
       const batch = times.slice(i, i + batchSize);
       const batchPromises = batch.map(async (time) => {
-        const blob = await generateThumbnail(file, time);
-        return {
-          time,
-          url: URL.createObjectURL(blob)
-        };
+        try {
+          // Use server-side thumbnail generation
+          const formData = new FormData();
+          formData.append('file', file);
+          formData.append('time', time.toString());
+          
+          const response = await fetch('/api/thumbnail', {
+            method: 'POST',
+            body: formData
+          });
+          
+          if (!response.ok) {
+            throw new Error(`Failed to generate thumbnail at ${time}s`);
+          }
+          
+          const blob = await response.blob();
+          return {
+            time,
+            url: URL.createObjectURL(blob)
+          };
+        } catch (error) {
+          console.warn(`Failed to generate thumbnail at ${time}s:`, error);
+          // Return a placeholder or skip this thumbnail
+          return null;
+        }
       });
       
       const batchResults = await Promise.all(batchPromises);
-      thumbnails.push(...batchResults);
+      const validThumbnails = batchResults.filter((result): result is ThumbnailResult => result !== null);
+      thumbnails.push(...validThumbnails);
     }
     
     return thumbnails.sort((a, b) => a.time - b.time);
@@ -86,7 +101,7 @@ export async function generateThumbnails(
 }
 
 /**
- * Process video chunks with optimized settings
+ * Process video chunks using server-side processing
  */
 export async function processVideoChunks(
   chunks: VideoChunk[],
@@ -97,8 +112,8 @@ export async function processVideoChunks(
     height?: number;
   },
   onProgress?: (progress: number) => void
-): Promise<Blob> {
-  // Combine chunks into a single file
+): Promise<string> {
+  // Combine chunks into a single file for server processing
   const totalSize = chunks.reduce((sum, chunk) => sum + chunk.data.length, 0);
   const combinedData = new Uint8Array(totalSize);
   
@@ -111,18 +126,21 @@ export async function processVideoChunks(
   const file = new File([combinedData], 'input.mp4', { type: 'video/mp4' });
   
   try {
-    return await processVideo(file, {
-      startTime: options.startTime,
-      duration: options.endTime !== undefined
-        ? options.endTime - (options.startTime || 0)
-        : undefined,
-      width: options.width,
-      height: options.height,
+    // Use server-side processing
+    const videos = [{ file, id: 'chunked-video' }];
+    const beatMarkers = [
+      options.startTime || 0,
+      options.endTime || (await getVideoMetadata(file)).duration
+    ];
+    
+    return await processVideoWithBeats(
+      videos,
+      beatMarkers,
+      'Chunked Video Processing',
       onProgress
-    });
+    );
   } finally {
-    // Clean up the temporary file
-    URL.revokeObjectURL(URL.createObjectURL(file));
+    // The server handles file cleanup
   }
 }
 
@@ -168,15 +186,43 @@ export function cleanupResources(urls: string[]) {
 }
 
 /**
- * Check if video format is supported
+ * Check if video format is supported by server
  */
 export function isVideoSupported(file: File): boolean {
   const supportedFormats = [
     'video/mp4',
     'video/webm',
     'video/quicktime',
-    'video/x-msvideo'
+    'video/x-msvideo',
+    'video/avi'
   ];
   
   return supportedFormats.includes(file.type);
+}
+
+/**
+ * Upload multiple videos to server
+ */
+export async function uploadVideos(
+  files: File[],
+  onProgress?: (fileIndex: number, totalFiles: number) => void
+): Promise<Array<{ id: string; url: string; duration: number }>> {
+  const uploadedVideos = [];
+  
+  for (let i = 0; i < files.length; i++) {
+    const file = files[i];
+    onProgress?.(i, files.length);
+    
+    const serverUrl = await uploadVideoFile(file);
+    const metadata = await getVideoMetadata(file);
+    
+    uploadedVideos.push({
+      id: `video-${i}`,
+      url: serverUrl,
+      duration: metadata.duration
+    });
+  }
+  
+  onProgress?.(files.length, files.length);
+  return uploadedVideos;
 } 

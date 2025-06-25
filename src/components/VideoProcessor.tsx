@@ -3,6 +3,8 @@ import { useDropzone } from 'react-dropzone';
 import { toast } from 'sonner';
 import { useVideoStore } from '../stores/videoStore';
 import { ProcessingModal } from './ProcessingModal';
+import { uploadVideoFile, getVideoMetadata } from '../utils/ffmpeg';
+import { generateThumbnails, isVideoSupported } from '../utils/videoOptimization';
 
 interface VideoProcessorProps {
   onProcessingComplete: () => void;
@@ -25,61 +27,6 @@ interface Thumbnail {
   time: number;
   url: string;
 }
-
-// Mock video processing functions
-const mockProcessVideo = async (
-  file: File,
-  options: ProcessingOptions,
-  onProgress: (progress: number) => void
-): Promise<Blob> => {
-  // Simulate video processing with delays
-  const totalSteps = 10;
-  for (let step = 0; step < totalSteps; step++) {
-    await new Promise(resolve => setTimeout(resolve, 500));
-    onProgress((step + 1) / totalSteps);
-  }
-  
-  // TODO: Replace with actual FFmpeg processing
-  // Example FFmpeg command that would be used:
-  // ffmpeg -i input.mp4 -vf scale=1280:720 -c:v libx264 -crf 23 -preset medium -c:a aac output.mp4
-  
-  // For now, just return the original file
-  return file;
-};
-
-const mockGenerateThumbnails = async (file: File, duration: number): Promise<Thumbnail[]> => {
-  // Create a video element to generate thumbnails
-  const video = document.createElement('video');
-  video.src = URL.createObjectURL(file);
-  
-  await new Promise((resolve) => {
-    video.onloadedmetadata = resolve;
-  });
-  
-  // Generate 3 thumbnails at different points
-  const thumbnailTimes = [0, duration / 2, duration * 0.9];
-  const thumbnails: Thumbnail[] = [];
-  
-  for (const time of thumbnailTimes) {
-    // TODO: Replace with actual FFmpeg thumbnail generation
-    // Example FFmpeg command:
-    // ffmpeg -i input.mp4 -ss {time} -vframes 1 thumbnail.jpg
-    
-    // For now, create a mock thumbnail using the first frame
-    thumbnails.push({
-      time,
-      url: URL.createObjectURL(file)
-    });
-  }
-  
-  URL.revokeObjectURL(video.src);
-  return thumbnails;
-};
-
-const isVideoSupported = (file: File): boolean => {
-  const supportedFormats = ['video/mp4', 'video/webm', 'video/quicktime', 'video/x-msvideo'];
-  return supportedFormats.includes(file.type);
-};
 
 export const VideoProcessor: React.FC<VideoProcessorProps> = ({ onProcessingComplete }) => {
   const [thumbnailUrls, setThumbnailUrls] = useState<string[]>([]);
@@ -110,54 +57,49 @@ export const VideoProcessor: React.FC<VideoProcessorProps> = ({ onProcessingComp
     
     try {
       // Get video metadata
-      const video = document.createElement('video');
-      video.src = URL.createObjectURL(file);
-      await new Promise((resolve) => {
-        video.onloadedmetadata = resolve;
+      setProcessingProgress({
+        value: 0.1,
+        message: 'Analyzing video...'
       });
-      const duration = video.duration;
-      URL.revokeObjectURL(video.src);
       
-      // Generate thumbnails
+      const metadata = await getVideoMetadata(file);
+      
+      // Upload video to server
       setProcessingProgress({
         value: 0.3,
+        message: 'Uploading video to server...'
+      });
+      
+      const serverUrl = await uploadVideoFile(file);
+      
+      // Generate thumbnails using server-side processing
+      setProcessingProgress({
+        value: 0.6,
         message: 'Generating thumbnails...'
       });
       
-      const thumbnails = await mockGenerateThumbnails(file, duration);
+      const thumbnails = await generateThumbnails(file, metadata.duration);
       setThumbnailUrls(thumbnails.map(t => t.url));
       
-      // Process video
       setProcessingProgress({
-        value: 0.5,
-        message: 'Processing video...'
+        value: 0.9,
+        message: 'Finalizing...'
       });
       
-      const processedVideo = await mockProcessVideo(
-        file,
-        {
-          targetWidth: 1280,
-          targetHeight: 720,
-          quality: 0.8
-        },
-        (progress) => {
-          setProcessingProgress({
-            value: 0.5 + progress * 0.5,
-            message: 'Processing video...'
-          });
-        }
-      );
-      
-      // Add to store
-      const videoUrl = URL.createObjectURL(processedVideo);
+      // Add to store with server URL
       addVideo({
         id: Date.now().toString(),
-        url: videoUrl,
+        url: serverUrl, // Use server URL instead of blob URL
         thumbnails: thumbnails.map(t => ({ time: t.time, url: t.url })),
-        duration
+        duration: metadata.duration
       });
       
-      toast.success('Video processed successfully!');
+      setProcessingProgress({
+        value: 1,
+        message: 'Video processed successfully!'
+      });
+      
+      toast.success('Video processed and uploaded successfully!');
       onProcessingComplete();
     } catch (error) {
       console.error('Video processing error:', error);
@@ -194,7 +136,7 @@ export const VideoProcessor: React.FC<VideoProcessorProps> = ({ onProcessingComp
           {isDragActive ? 'Drop the video here' : 'Drag & drop a video, or click to select'}
         </p>
         <p className="text-sm text-gray-500">
-          Supports MP4, WebM, MOV, and AVI formats
+          Supports MP4, WebM, MOV, and AVI formats. Processing happens on our servers for optimal performance.
         </p>
       </div>
       

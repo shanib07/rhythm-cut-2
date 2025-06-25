@@ -13,25 +13,6 @@ const nextConfig = {
 
     return config;
   },
-  
-  // Add headers for Cross-Origin Isolation (required for SharedArrayBuffer and FFmpeg.wasm)
-  async headers() {
-    return [
-      {
-        source: '/:path*',
-        headers: [
-          {
-            key: 'Cross-Origin-Embedder-Policy',
-            value: 'require-corp',
-          },
-          {
-            key: 'Cross-Origin-Opener-Policy',
-            value: 'same-origin',
-          },
-        ],
-      },
-    ];
-  },
 
   eslint: {
     ignoreDuringBuilds: true,

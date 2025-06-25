@@ -12,9 +12,6 @@
   },
   "dependencies": {
     "@auth/prisma-adapter": "^2.10.0",
-    "@ffmpeg/core": "^0.12.10",
-    "@ffmpeg/ffmpeg": "^0.12.15",
-    "@ffmpeg/util": "^0.12.2",
     "@prisma/client": "^5.10.0",
     "@railway/cli": "^3.5.2",
     "@types/next-auth": "^3.13.0",

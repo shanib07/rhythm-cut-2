@@ -1,4 +1,4 @@
-// Types
+// Server-side video processing utilities
 export interface VideoMetadata {
   duration: number;
   width: number;
@@ -10,48 +10,53 @@ interface ProgressCallback {
   (progress: number): void;
 }
 
-// Mock video processing delay (ms)
-const PROCESSING_DELAY = 500;
-const MOCK_METADATA: VideoMetadata = {
-  duration: 60,
-  width: 1920,
-  height: 1080,
-  fps: 30
-};
-
-/**
- * Simulates progress updates over time
- */
-async function simulateProgress(
-  durationMs: number,
-  onProgress?: ProgressCallback
-): Promise<void> {
-  const steps = 10;
-  const stepDelay = durationMs / steps;
-  
-  for (let i = 0; i < steps; i++) {
-    await new Promise(resolve => setTimeout(resolve, stepDelay));
-    onProgress?.((i + 1) / steps);
-  }
+interface ProcessingJob {
+  projectId: string;
+  status: 'pending' | 'uploading' | 'processing' | 'completed' | 'error';
+  progress: number;
+  message?: string;
+  outputUrl?: string;
+  error?: string;
 }
 
 /**
- * Mock function to get video metadata
+ * Upload a video file to the server
+ */
+export const uploadVideoFile = async (file: File): Promise<string> => {
+  const formData = new FormData();
+  formData.append('file', file);
+  
+  const response = await fetch('/api/upload', {
+    method: 'POST',
+    body: formData
+  });
+  
+  if (!response.ok) {
+    throw new Error('Failed to upload video file');
+  }
+  
+  const data = await response.json();
+  return data.url;
+};
+
+/**
+ * Get video metadata using server-side processing
  */
 export const getVideoMetadata = async (videoFile: File): Promise<VideoMetadata> => {
-  await new Promise(resolve => setTimeout(resolve, PROCESSING_DELAY));
-  
-  // Create a video element to get actual duration
+  // Create a video element to get basic metadata
   const videoEl = document.createElement('video');
   videoEl.src = URL.createObjectURL(videoFile);
   
-  const metadata = await new Promise<VideoMetadata>((resolve) => {
+  const metadata = await new Promise<VideoMetadata>((resolve, reject) => {
     videoEl.onloadedmetadata = () => {
       resolve({
-        ...MOCK_METADATA,
-        duration: videoEl.duration
+        duration: videoEl.duration,
+        width: videoEl.videoWidth || 1920,
+        height: videoEl.videoHeight || 1080,
+        fps: 30 // Default FPS, server can provide more accurate value
       });
     };
+    videoEl.onerror = () => reject(new Error('Failed to load video metadata'));
   });
   
   URL.revokeObjectURL(videoEl.src);
@@ -59,39 +64,134 @@ export const getVideoMetadata = async (videoFile: File): Promise<VideoMetadata> 
 };
 
 /**
- * Mock function to trim video
+ * Process video on server with beat markers
+ */
+export const processVideoWithBeats = async (
+  videos: { file: File; id: string }[],
+  beatMarkers: number[],
+  projectName: string = 'Video Processing',
+  onProgress?: ProgressCallback
+): Promise<string> => {
+  // Upload all video files first
+  const uploadedVideos = [];
+  for (let i = 0; i < videos.length; i++) {
+    const video = videos[i];
+    const serverUrl = await uploadVideoFile(video.file);
+    const metadata = await getVideoMetadata(video.file);
+    
+    uploadedVideos.push({
+      id: video.id,
+      url: serverUrl,
+      duration: metadata.duration
+    });
+    
+    // Update progress during upload phase (0-20%)
+    onProgress?.((i + 1) / videos.length * 0.2);
+  }
+
+  // Start server-side processing
+  const response = await fetch('/api/process', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      name: projectName,
+      inputVideos: uploadedVideos,
+      beatMarkers: beatMarkers
+    })
+  });
+
+  if (!response.ok) {
+    throw new Error('Failed to start video processing');
+  }
+
+  const { success, projectId, error } = await response.json();
+  if (!success) {
+    throw new Error(error || 'Failed to start processing');
+  }
+
+  // Poll for progress
+  return new Promise((resolve, reject) => {
+    const pollProgress = async () => {
+      try {
+        const progressResponse = await fetch(`/api/progress/${projectId}`);
+        const progressData: ProcessingJob = await progressResponse.json();
+
+        // Update progress (20-100% for processing phase)
+        if (onProgress && progressData.progress !== undefined) {
+          onProgress(0.2 + (progressData.progress / 100) * 0.8);
+        }
+
+        if (progressData.status === 'completed' && progressData.outputUrl) {
+          resolve(progressData.outputUrl);
+        } else if (progressData.status === 'error') {
+          reject(new Error(progressData.error || 'Processing failed'));
+        } else {
+          // Continue polling
+          setTimeout(pollProgress, 1000);
+        }
+      } catch (error) {
+        reject(error);
+      }
+    };
+
+    pollProgress();
+  });
+};
+
+/**
+ * Legacy function for trimming video (now uses server processing)
  */
 export const trimVideo = async (
   videoFile: File,
   startTime: number,
   endTime: number,
   onProgress?: ProgressCallback
-): Promise<Blob> => {
-  // Simulate processing time based on video duration
-  const processingTime = (endTime - startTime) * 100;
-  await simulateProgress(processingTime, onProgress);
+): Promise<string> => {
+  const videos = [{ file: videoFile, id: 'single-video' }];
+  const beatMarkers = [startTime, endTime];
   
-  // For mock implementation, just return the original file
-  return videoFile;
+  return processVideoWithBeats(
+    videos,
+    beatMarkers,
+    'Video Trim',
+    onProgress
+  );
 };
 
 /**
- * Mock function to concatenate videos
+ * Legacy function for concatenating videos (now uses server processing)
  */
 export const concatenateVideos = async (
   videoFiles: File[],
   onProgress?: ProgressCallback
-): Promise<Blob> => {
-  // Simulate processing time based on number of files
-  const processingTime = videoFiles.length * 2000;
-  await simulateProgress(processingTime, onProgress);
+): Promise<string> => {
+  const videos = videoFiles.map((file, index) => ({
+    file,
+    id: `video-${index}`
+  }));
   
-  // For mock implementation, return the first file
-  return videoFiles[0];
+  // Create beat markers for simple concatenation (each video plays in full)
+  const beatMarkers = [0];
+  let currentTime = 0;
+  
+  for (const file of videoFiles) {
+    const metadata = await getVideoMetadata(file);
+    currentTime += metadata.duration;
+    beatMarkers.push(currentTime);
+  }
+  
+  return processVideoWithBeats(
+    videos,
+    beatMarkers,
+    'Video Concatenation',
+    onProgress
+  );
 };
 
 /**
- * Mock function to process large video
+ * Legacy function for processing large video (now uses server processing)
  */
 export const processLargeVideo = async (
   videoFile: File,
@@ -102,17 +202,23 @@ export const processLargeVideo = async (
     targetHeight?: number;
   },
   onProgress?: ProgressCallback
-): Promise<Blob> => {
-  // Simulate processing time based on file size
-  const processingTime = Math.min(videoFile.size / 1000000 * 500, 5000);
-  await simulateProgress(processingTime, onProgress);
+): Promise<string> => {
+  const videos = [{ file: videoFile, id: 'large-video' }];
+  const beatMarkers = [
+    operations.startTime || 0,
+    operations.endTime || (await getVideoMetadata(videoFile)).duration
+  ];
   
-  // For mock implementation, return the original file
-  return videoFile;
+  return processVideoWithBeats(
+    videos,
+    beatMarkers,
+    'Large Video Processing',
+    onProgress
+  );
 };
 
 /**
- * Mock function to process video with options
+ * Legacy function for processing video with options (now uses server processing)
  */
 export async function processVideo(
   inputFile: File,
@@ -123,46 +229,64 @@ export async function processVideo(
     height?: number;
     onProgress?: (progress: number) => void;
   }
-): Promise<Blob> {
-  // Simulate processing time based on options
-  const processingTime = 3000 + (options.duration || 0) * 50;
-  await simulateProgress(processingTime, options.onProgress);
+): Promise<string> {
+  const videos = [{ file: inputFile, id: 'processed-video' }];
+  const endTime = (options.startTime || 0) + (options.duration || (await getVideoMetadata(inputFile)).duration);
+  const beatMarkers = [options.startTime || 0, endTime];
   
-  // For mock implementation, return the original file
-  return inputFile;
+  return processVideoWithBeats(
+    videos,
+    beatMarkers,
+    'Video Processing',
+    options.onProgress
+  );
 }
 
 /**
- * Mock function to generate thumbnail
+ * Generate thumbnail using server-side processing
  */
 export async function generateThumbnail(
   inputFile: File,
   timeInSeconds: number
-): Promise<Blob> {
-  await new Promise(resolve => setTimeout(resolve, PROCESSING_DELAY));
+): Promise<string> {
+  const formData = new FormData();
+  formData.append('file', inputFile);
+  formData.append('time', timeInSeconds.toString());
   
-  // For mock implementation, return the original file
-  // In a real implementation, this would return a JPEG/PNG blob
-  return inputFile;
+  const response = await fetch('/api/thumbnail', {
+    method: 'POST',
+    body: formData
+  });
+  
+  if (!response.ok) {
+    throw new Error('Failed to generate thumbnail');
+  }
+  
+  const blob = await response.blob();
+  return URL.createObjectURL(blob);
 }
 
-// Mock cleanup function (no-op in mock version)
+/**
+ * No cleanup needed for server-side processing
+ */
 export async function cleanupFFmpeg(): Promise<void> {
-  // Nothing to clean up in mock version
+  // No browser-side resources to clean up
 }
 
-// Mock memory management functions
+/**
+ * Memory info not relevant for server-side processing
+ */
 export function getMemoryInfo(): { total: number; free: number } {
   return {
-    total: 1024 * 1024 * 1024, // 1GB
-    free: 512 * 1024 * 1024    // 512MB
+    total: Infinity,
+    free: Infinity
   };
 }
 
 export function hasEnoughMemory(): boolean {
-  return true; // Always return true in mock version
+  return true; // Server handles memory management
 }
 
 export async function tryFreeMemory(): Promise<void> {
-  // No-op in mock version
+  // No-op for server-side processing
 } 

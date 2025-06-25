@@ -240,9 +240,9 @@ export default function EditPage() {
     <div className="min-h-screen bg-[#0F172A] p-8 text-gray-100">
       <header className="mb-8">
         <h1 className="text-3xl font-bold flex items-center gap-2 text-white">
-          <Video className="w-8 h-8 text-[#06B6D4]" /> Beat-Sync Video Editor (FFmpeg-Powered)
+          <Video className="w-8 h-8 text-[#06B6D4]" /> Beat-Sync Video Editor (Server-Powered)
         </h1>
-        <p className="text-gray-400 mt-2">High-performance video editing with FFmpeg.wasm</p>
+        <p className="text-gray-400 mt-2">High-performance server-side video editing with FFmpeg</p>
       </header>
 
       <div className="space-y-6">
