@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
+import { getServerSession } from 'next-auth';
 
 const prisma = new PrismaClient();
 
@@ -7,64 +8,50 @@ export async function GET(
   request: Request,
   { params }: { params: Promise<{ projectId: string }> }
 ): Promise<Response> {
-  console.log('🔄 /api/progress - Request received');
-  
   try {
     const { projectId } = await params;
-    console.log('🔍 Project ID extracted:', projectId);
     
     if (!projectId) {
-      console.log('❌ No project ID provided');
       return NextResponse.json(
         { error: 'Project ID is required' },
         { status: 400 }
       );
     }
     
-    console.log('🔍 Searching for project in database...');
-    // Get project without authentication check (for now)
-    const project = await prisma.project.findUnique({
+    const session = await getServerSession();
+    if (!session?.user?.email) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+    
+    // Get project to verify ownership and get progress
+    const project = await prisma.project.findFirst({
       where: {
-        id: projectId
+        id: projectId,
+        user: {
+          email: session.user.email
+        }
       }
     });
     
     if (!project) {
-      console.log('❌ Project not found in database');
       return NextResponse.json(
         { error: 'Project not found' },
         { status: 404 }
       );
     }
     
-    console.log('✅ Project found:', {
-      id: project.id,
-      status: project.status,
-      progress: project.progress,
-      name: project.name
-    });
-    
     // Return progress information
-    const responseData = {
+    return NextResponse.json({
       status: project.status,
       progress: project.progress || 0,
       message: getStatusMessage(project.status, project.progress || 0),
-      outputUrl: project.outputUrl,
-      error: project.status === 'error' ? 'Processing failed' : undefined
-    };
-    
-    console.log('📊 Returning progress data:', responseData);
-    return NextResponse.json(responseData);
-    
-  } catch (error) {
-    console.error('💥 Progress check failed:', error);
-    console.error('Error details:', {
-      message: error instanceof Error ? error.message : 'Unknown error',
-      stack: error instanceof Error ? error.stack : 'No stack trace'
+      outputUrl: project.outputUrl
     });
     
+  } catch (error) {
+    console.error('Progress check failed:', error);
     return NextResponse.json(
-      { error: 'Internal server error', details: error instanceof Error ? error.message : 'Unknown error' },
+      { error: 'Internal server error' },
       { status: 500 }
     );
   }

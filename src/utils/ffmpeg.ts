@@ -23,28 +23,20 @@ interface ProcessingJob {
  * Upload a video file to the server
  */
 export const uploadVideoFile = async (file: File): Promise<string> => {
-  console.log(`📤 uploadVideoFile STARTED for: ${file.name} (${(file.size / 1024 / 1024).toFixed(2)}MB)`);
-  
   const formData = new FormData();
   formData.append('file', file);
   
-  console.log('🌐 Making POST request to /api/upload...');
   const response = await fetch('/api/upload', {
     method: 'POST',
     body: formData
   });
   
-  console.log(`📨 Upload response status: ${response.status} ${response.statusText}`);
-  
   if (!response.ok) {
-    console.log('❌ Upload failed, reading error response...');
     const errorData = await response.json().catch(() => ({ error: 'Upload failed' }));
-    console.error('💥 Upload error data:', errorData);
     throw new Error(`Failed to upload video file: ${errorData.error || response.statusText}`);
   }
   
   const data = await response.json();
-  console.log('✅ Upload successful, response data:', data);
   return data.url;
 };
 
@@ -90,41 +82,53 @@ export const processVideoWithBeats = async (
   projectName: string = 'Video Processing',
   onProgress?: ProgressCallback
 ): Promise<string> => {
-  try {
-    console.log('🎬 processVideoWithBeats STARTED');
-    console.log('Starting video processing with beats...');
-    console.log(`Videos: ${videos.length}, Beat markers: ${beatMarkers.length}`);
+  console.log('🚀 PROCESS: Starting processVideoWithBeats', {
+    videosCount: videos.length,
+    beatMarkersCount: beatMarkers.length,
+    projectName,
+    timestamp: new Date().toISOString()
+  });
 
+  try {
     // Validate inputs
     if (!videos || videos.length === 0) {
-      console.log('❌ No video files provided');
       throw new Error('No video files provided');
     }
 
     if (!beatMarkers || beatMarkers.length < 2) {
-      console.log('❌ Need at least 2 beat markers');
       throw new Error('Need at least 2 beat markers to create video segments');
     }
 
-    console.log('✅ Input validation passed');
+    console.log('🚀 PROCESS: Input validation passed', {
+      videos: videos.map(v => ({ id: v.id, fileName: v.file.name, fileSize: v.file.size })),
+      beatMarkers
+    });
 
     // Upload all video files first
-    console.log('📤 Starting file upload phase...');
+    console.log('🚀 PROCESS: Starting video uploads...');
     onProgress?.(0.02);
     const uploadedVideos = [];
     
     for (let i = 0; i < videos.length; i++) {
       const video = videos[i];
-      console.log(`📤 Uploading video ${i + 1}/${videos.length}: ${video.file.name} (${(video.file.size / 1024 / 1024).toFixed(2)}MB)`);
+      console.log(`🚀 PROCESS: Uploading video ${i + 1}/${videos.length}`, {
+        videoId: video.id,
+        fileName: video.file.name,
+        fileSize: video.file.size
+      });
       
       try {
-        console.log(`🌐 Making upload request to /api/upload for ${video.file.name}`);
+        const uploadStartTime = Date.now();
         const serverUrl = await uploadVideoFile(video.file);
-        console.log(`✅ Upload successful for ${video.file.name}, server URL: ${serverUrl}`);
+        const uploadTime = Date.now() - uploadStartTime;
         
-        console.log(`📊 Getting metadata for ${video.file.name}...`);
+        console.log(`🚀 PROCESS: Video ${i + 1} uploaded successfully`, {
+          videoId: video.id,
+          serverUrl,
+          uploadTimeMs: uploadTime
+        });
+        
         const metadata = await getVideoMetadata(video.file);
-        console.log(`✅ Metadata retrieved: ${metadata.duration}s, ${metadata.width}x${metadata.height}`);
         
         uploadedVideos.push({
           id: video.id,
@@ -133,79 +137,101 @@ export const processVideoWithBeats = async (
         });
         
         // Update progress during upload phase (2-18%)
-        const uploadProgress = (i + 1) / videos.length * 0.16 + 0.02;
-        console.log(`📈 Upload progress: ${Math.round(uploadProgress * 100)}%`);
-        onProgress?.(uploadProgress);
+        onProgress?.((i + 1) / videos.length * 0.16 + 0.02);
       } catch (uploadError) {
         const errorMessage = uploadError instanceof Error ? uploadError.message : 'Unknown upload error';
-        console.error(`💥 Upload failed for ${video.file.name}:`, errorMessage);
+        console.error(`🚀 PROCESS: Upload failed for video ${i + 1}`, {
+          videoId: video.id,
+          fileName: video.file.name,
+          error: errorMessage
+        });
         throw new Error(`Failed to upload video "${video.file.name}": ${errorMessage}`);
       }
     }
 
-    console.log('✅ All videos uploaded successfully');
-    console.log('📊 Uploaded videos summary:', uploadedVideos.map(v => ({ id: v.id, url: v.url, duration: v.duration })));
+    console.log('🚀 PROCESS: All videos uploaded successfully', {
+      uploadedCount: uploadedVideos.length,
+      totalDuration: uploadedVideos.reduce((sum, v) => sum + v.duration, 0).toFixed(2)
+    });
 
     // Start server-side processing
-    console.log('🚀 Starting server-side processing...');
+    console.log('🚀 PROCESS: Starting server-side processing request...');
     onProgress?.(0.18);
     
-    const requestBody = {
-      name: projectName,
-      inputVideos: uploadedVideos,
-      beatMarkers: beatMarkers
-    };
-    
-    console.log('📨 Making request to /api/process with body:', JSON.stringify(requestBody, null, 2));
-    
+    const apiRequestStartTime = Date.now();
     const response = await fetch('/api/process', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify(requestBody)
+      body: JSON.stringify({
+        name: projectName,
+        inputVideos: uploadedVideos,
+        beatMarkers: beatMarkers
+      })
     });
 
-    console.log('📨 /api/process response status:', response.status, response.statusText);
+    const apiRequestTime = Date.now() - apiRequestStartTime;
+    console.log('🚀 PROCESS: API request completed', {
+      responseStatus: response.status,
+      responseOk: response.ok,
+      requestTimeMs: apiRequestTime
+    });
 
     if (!response.ok) {
-      console.log('❌ /api/process request failed, reading error response...');
       const errorData = await response.json().catch(() => ({ error: 'Processing failed' }));
-      console.error('💥 Processing API error:', errorData);
+      console.error('🚀 PROCESS: API request failed', {
+        status: response.status,
+        statusText: response.statusText,
+        errorData
+      });
       throw new Error(`Server processing failed: ${errorData.error || errorData.details || response.statusText}`);
     }
 
-    const responseData = await response.json();
-    console.log('✅ /api/process response data:', responseData);
-    
-    const { success, projectId, error } = responseData;
+    const { success, projectId, error } = await response.json();
     if (!success) {
-      console.log('❌ Processing start failed:', error);
+      console.error('🚀 PROCESS: Server rejected processing request', { error });
       throw new Error(`Failed to start processing: ${error || 'Unknown error'}`);
     }
 
-    console.log(`🎯 Processing started successfully for project: ${projectId}`);
+    console.log('🚀 PROCESS: Processing started successfully', {
+      projectId,
+      timestamp: new Date().toISOString()
+    });
     onProgress?.(0.2);
 
     // Poll for progress with exponential backoff for errors
-    console.log('🔄 Starting progress polling...');
+    console.log('🚀 PROCESS: Starting progress polling...');
     return new Promise((resolve, reject) => {
       let pollAttempts = 0;
       const maxAttempts = 360; // 6 minutes max (360 * 1000ms)
       const maxErrorAttempts = 5;
       let errorAttempts = 0;
+      let lastProgress = 0;
+      let stuckCounter = 0;
+      const maxStuckPolls = 30; // If progress doesn't change for 30 polls (30 seconds), consider it stuck
 
       const pollProgress = async () => {
         try {
           pollAttempts++;
           
           if (pollAttempts > maxAttempts) {
-            console.log('⏰ Polling timeout reached');
+            console.error('🚀 PROCESS: Polling timeout exceeded', {
+              projectId,
+              pollAttempts,
+              maxAttempts,
+              lastProgress
+            });
             reject(new Error('Processing timeout - the operation took too long'));
             return;
           }
 
-          console.log(`🔄 Progress poll attempt ${pollAttempts}/${maxAttempts} for project ${projectId}`);
+          console.log(`🚀 PROCESS: Polling attempt ${pollAttempts}`, {
+            projectId,
+            errorAttempts,
+            lastProgress
+          });
+
           const progressResponse = await fetch(`/api/progress/${projectId}`);
           
           if (!progressResponse.ok) {
@@ -214,52 +240,112 @@ export const processVideoWithBeats = async (
 
           const progressData: ProcessingJob = await progressResponse.json();
           
-          console.log(`📊 Progress update: ${progressData.status} - ${progressData.progress}%`);
-          console.log('📊 Full progress data:', progressData);
+          console.log('🚀 PROCESS: Progress update received', {
+            projectId,
+            status: progressData.status,
+            progress: progressData.progress,
+            message: progressData.message,
+            pollAttempt: pollAttempts
+          });
+
+          // Check for stuck progress
+          if (progressData.progress === lastProgress) {
+            stuckCounter++;
+            if (stuckCounter >= maxStuckPolls) {
+              console.error('🚀 PROCESS: Progress appears stuck', {
+                projectId,
+                stuckCounter,
+                lastProgress,
+                currentStatus: progressData.status
+              });
+              
+              // Try to get more detailed job status
+              try {
+                const jobStatusResponse = await fetch(`/api/job-status/${projectId}`);
+                if (jobStatusResponse.ok) {
+                  const jobStatus = await jobStatusResponse.json();
+                  console.log('🚀 PROCESS: Detailed job status', { jobStatus });
+                }
+              } catch (jobError) {
+                console.warn('🚀 PROCESS: Could not get detailed job status', { 
+                  error: jobError instanceof Error ? jobError.message : 'Unknown error' 
+                });
+              }
+              
+              reject(new Error(`Processing appears stuck at ${lastProgress}% for 30+ seconds`));
+              return;
+            }
+          } else {
+            stuckCounter = 0; // Reset stuck counter if progress changed
+            lastProgress = progressData.progress || 0;
+          }
 
           // Update progress (20-100% for processing phase)
           if (onProgress && progressData.progress !== undefined) {
-            const overallProgress = 0.2 + (progressData.progress / 100) * 0.8;
-            onProgress(overallProgress);
+            onProgress(0.2 + (progressData.progress / 100) * 0.8);
           }
 
           if (progressData.status === 'completed' && progressData.outputUrl) {
-            console.log('🎉 Processing completed successfully');
-            console.log('📥 Final output URL:', progressData.outputUrl);
+            console.log('🚀 PROCESS: Processing completed successfully', {
+              projectId,
+              outputUrl: progressData.outputUrl,
+              totalPollAttempts: pollAttempts,
+              totalTimeMs: pollAttempts * 1000
+            });
             resolve(progressData.outputUrl);
           } else if (progressData.status === 'error') {
-            console.log('💥 Processing failed with error:', progressData.error);
+            console.error('🚀 PROCESS: Processing failed on server', {
+              projectId,
+              error: progressData.error,
+              pollAttempts
+            });
             reject(new Error(`Video processing failed: ${progressData.error || 'Unknown processing error'}`));
           } else {
             // Reset error counter on successful poll
             errorAttempts = 0;
             // Continue polling with 1 second interval
-            console.log(`⏳ Continuing to poll, next check in 1 second...`);
             setTimeout(pollProgress, 1000);
           }
         } catch (pollError) {
           errorAttempts++;
-          console.warn(`🔄 Progress poll error (${errorAttempts}/${maxErrorAttempts}):`, pollError);
+          const errorMessage = pollError instanceof Error ? pollError.message : 'Unknown polling error';
+          console.warn('🚀 PROCESS: Progress poll error', {
+            projectId,
+            errorAttempts,
+            maxErrorAttempts,
+            error: errorMessage,
+            pollAttempt: pollAttempts
+          });
           
           if (errorAttempts >= maxErrorAttempts) {
-            const errorMessage = pollError instanceof Error ? pollError.message : 'Unknown polling error';
-            console.log('💥 Too many polling errors, giving up');
+            console.error('🚀 PROCESS: Too many polling errors', {
+              projectId,
+              errorAttempts,
+              lastError: errorMessage
+            });
             reject(new Error(`Failed to check processing progress: ${errorMessage}`));
           } else {
             // Exponential backoff on errors
             const delay = Math.min(1000 * Math.pow(2, errorAttempts), 10000);
-            console.log(`⏳ Retrying poll in ${delay}ms...`);
+            console.log('🚀 PROCESS: Retrying poll after delay', {
+              projectId,
+              delayMs: delay,
+              attempt: errorAttempts
+            });
             setTimeout(pollProgress, delay);
           }
         }
       };
 
-      console.log('🔄 Starting initial progress poll...');
       pollProgress();
     });
 
   } catch (error) {
-    console.error('💥 processVideoWithBeats failed:', error);
+    console.error('🚀 PROCESS: processVideoWithBeats failed', {
+      error: error instanceof Error ? error.message : 'Unknown error',
+      stack: error instanceof Error ? error.stack : undefined,
+      timestamp: new Date().toISOString()
+    });
     throw error;
   }
 };

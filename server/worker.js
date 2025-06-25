@@ -6,8 +6,28 @@ const fs = require('fs').promises;
 
 const prisma = new PrismaClient();
 
-// Create processing queue
+// Create processing queue with detailed logging
+console.log('📋 WORKER: Initializing video processing queue...', {
+  redisUrl: process.env.REDIS_URL ? 'Set' : 'Not set',
+  timestamp: new Date().toISOString()
+});
+
 const videoQueue = new Queue('video-processing', process.env.REDIS_URL);
+
+// Test Redis connection on startup
+videoQueue.on('ready', () => {
+  console.log('📋 WORKER: Queue ready and connected to Redis', {
+    queueName: videoQueue.name,
+    timestamp: new Date().toISOString()
+  });
+});
+
+videoQueue.on('error', (error) => {
+  console.error('📋 WORKER: Queue error', {
+    error: error.message,
+    timestamp: new Date().toISOString()
+  });
+});
 
 // Helper function to update progress
 async function updateProgress(projectId, status, progress) {
@@ -16,20 +36,37 @@ async function updateProgress(projectId, status, progress) {
       where: { id: projectId },
       data: { status, progress }
     });
-    console.log(`Project ${projectId}: ${status} - ${progress}%`);
+    console.log(`📈 PROGRESS: Project ${projectId} - ${status} - ${progress}%`);
   } catch (error) {
-    console.error('Failed to update progress:', error);
+    console.error('📈 PROGRESS: Failed to update progress', {
+      projectId,
+      error: error.message,
+      timestamp: new Date().toISOString()
+    });
   }
 }
 
 // Optimized video processing with beat markers - single pass, no gaps
 async function processVideoWithBeats(inputVideos, beatMarkers, outputPath, projectId) {
+  console.log('🎥 FFMPEG: Starting video processing', {
+    projectId,
+    inputVideosCount: inputVideos.length,
+    beatMarkersCount: beatMarkers.length,
+    outputPath,
+    timestamp: new Date().toISOString()
+  });
+
   return new Promise((resolve, reject) => {
-    console.log('Processing video with beats - OPTIMIZED VERSION');
-    console.log(`Videos: ${inputVideos.length}, Beats: ${beatMarkers.length}`);
+    const processingStartTime = Date.now();
     
     if (!inputVideos || inputVideos.length === 0 || !beatMarkers || beatMarkers.length === 0) {
-      reject(new Error('No input videos or beat markers provided'));
+      const error = new Error('No input videos or beat markers provided');
+      console.error('🎥 FFMPEG: Invalid input data', {
+        projectId,
+        inputVideosCount: inputVideos?.length || 0,
+        beatMarkersCount: beatMarkers?.length || 0
+      });
+      reject(error);
       return;
     }
 
@@ -50,18 +87,37 @@ async function processVideoWithBeats(inputVideos, beatMarkers, outputPath, proje
       });
     }
 
-    console.log(`Created ${segments.length} segments for processing`);
+    console.log('🎥 FFMPEG: Created segments for processing', {
+      projectId,
+      segmentsCount: segments.length,
+      segments: segments.map((s, i) => ({
+        index: i,
+        videoUrl: s.video.url,
+        duration: s.duration.toFixed(3)
+      }))
+    });
 
     const tempDir = path.dirname(outputPath);
     
     // Create concat demuxer file for gap-free concatenation
-    const concatFilePath = path.join(tempDir, `concat_${Date.now()}.txt`);
+    const concatFilePath = path.join(tempDir, `concat_${Date.now()}_${projectId}.txt`);
     const segmentPaths = [];
+
+    // Add timeout for the entire processing
+    const processingTimeout = setTimeout(() => {
+      console.error('🎥 FFMPEG: Processing timeout exceeded', {
+        projectId,
+        timeoutMinutes: 5,
+        processingTimeMs: Date.now() - processingStartTime
+      });
+      reject(new Error('Video processing timeout (5 minutes exceeded)'));
+    }, 5 * 60 * 1000); // 5 minute timeout
 
     // Process segments with frame-accurate cutting to eliminate gaps
     Promise.all(segments.map((segment, index) => {
       return new Promise((segResolve, segReject) => {
-        const segmentPath = path.join(tempDir, `segment_${index}_${Date.now()}.mp4`);
+        const segmentStartTime = Date.now();
+        const segmentPath = path.join(tempDir, `segment_${index}_${Date.now()}_${projectId}.mp4`);
         segmentPaths.push(segmentPath);
 
         // Convert relative URL to absolute file path
@@ -70,10 +126,29 @@ async function processVideoWithBeats(inputVideos, beatMarkers, outputPath, proje
           videoPath = path.join(process.cwd(), 'public', segment.video.url);
         }
 
-        console.log(`Processing segment ${index}: ${segment.duration.toFixed(3)}s from ${videoPath}`);
+        console.log(`🎥 FFMPEG: Processing segment ${index}`, {
+          projectId,
+          segmentIndex: index,
+          duration: segment.duration.toFixed(3),
+          inputPath: videoPath,
+          outputPath: segmentPath,
+          timestamp: new Date().toISOString()
+        });
+
+        // Check if input file exists
+        fs.access(videoPath).then(() => {
+          console.log(`🎥 FFMPEG: Input file accessible for segment ${index}`, { videoPath });
+        }).catch((accessError) => {
+          console.error(`🎥 FFMPEG: Input file not accessible for segment ${index}`, {
+            videoPath,
+            error: accessError.message
+          });
+          segReject(new Error(`Input file not accessible: ${videoPath}`));
+          return;
+        });
 
         // OPTIMIZED FFMPEG COMMAND - No gaps, frame-accurate cutting
-        ffmpeg(videoPath)
+        const ffmpegCommand = ffmpeg(videoPath)
           .seekInput(segment.startTime) // Seek before input for precision
           .inputOptions([
             '-accurate_seek' // Enable accurate seeking
@@ -92,39 +167,89 @@ async function processVideoWithBeats(inputVideos, beatMarkers, outputPath, proje
             '-vsync', 'cfr',        // Constant frame rate
             '-async', '1',          // Audio sync
             '-copyts',              // Copy timestamps for precision
-            '-start_at_zero'        // Start timestamps at zero
+            '-start_at_zero',       // Start timestamps at zero
+            '-y'                    // Overwrite output files
           ])
-          .output(segmentPath)
+          .output(segmentPath);
+
+        // Add segment timeout
+        const segmentTimeout = setTimeout(() => {
+          console.error(`🎥 FFMPEG: Segment ${index} timeout`, {
+            projectId,
+            segmentIndex: index,
+            processingTimeMs: Date.now() - segmentStartTime
+          });
+          ffmpegCommand.kill('SIGKILL');
+          segReject(new Error(`Segment ${index} processing timeout`));
+        }, 2 * 60 * 1000); // 2 minute timeout per segment
+
+        ffmpegCommand
           .on('start', (commandLine) => {
-            console.log(`Segment ${index} FFmpeg command:`, commandLine);
+            console.log(`🎥 FFMPEG: Segment ${index} command started`, {
+              projectId,
+              segmentIndex: index,
+              command: commandLine,
+              timestamp: new Date().toISOString()
+            });
           })
           .on('progress', (progress) => {
+            console.log(`🎥 FFMPEG: Segment ${index} progress`, {
+              projectId,
+              segmentIndex: index,
+              progress: `${(progress.percent || 0).toFixed(1)}%`,
+              timemark: progress.timemark,
+              targetSize: progress.targetSize
+            });
+            
             const segmentProgress = 10 + (index / segments.length) * 60 + (progress.percent || 0) / segments.length * 0.6;
             updateProgress(projectId, 'processing', Math.min(70, Math.round(segmentProgress)));
           })
           .on('end', () => {
-            console.log(`Segment ${index} completed successfully`);
+            clearTimeout(segmentTimeout);
+            const segmentProcessingTime = Date.now() - segmentStartTime;
+            console.log(`🎥 FFMPEG: Segment ${index} completed successfully`, {
+              projectId,
+              segmentIndex: index,
+              outputPath: segmentPath,
+              processingTimeMs: segmentProcessingTime,
+              timestamp: new Date().toISOString()
+            });
             segResolve(segmentPath);
           })
           .on('error', (error) => {
-            console.error(`Segment ${index} failed:`, error);
+            clearTimeout(segmentTimeout);
+            const segmentProcessingTime = Date.now() - segmentStartTime;
+            console.error(`🎥 FFMPEG: Segment ${index} failed`, {
+              projectId,
+              segmentIndex: index,
+              error: error.message,
+              processingTimeMs: segmentProcessingTime,
+              timestamp: new Date().toISOString()
+            });
             segReject(error);
           })
           .run();
       });
     }))
     .then(async () => {
-      console.log('All segments processed, creating concat file...');
+      console.log('🎥 FFMPEG: All segments processed, creating concat file', {
+        projectId,
+        segmentPathsCount: segmentPaths.length,
+        concatFilePath
+      });
       
       // Create concat demuxer file for seamless concatenation
       const concatContent = segmentPaths.map(path => `file '${path}'`).join('\n');
       await fs.writeFile(concatFilePath, concatContent, 'utf8');
       
-      console.log('Concat file created, starting final concatenation...');
+      console.log('🎥 FFMPEG: Concat file created, starting final concatenation', {
+        projectId,
+        concatContent
+      });
       updateProgress(projectId, 'processing', 75);
 
       // OPTIMIZED CONCATENATION - Single pass, no re-encoding gaps
-      ffmpeg()
+      const finalCommand = ffmpeg()
         .input(concatFilePath)
         .inputOptions([
           '-f', 'concat',         // Use concat demuxer
@@ -134,18 +259,50 @@ async function processVideoWithBeats(inputVideos, beatMarkers, outputPath, proje
         .audioCodec('copy')       // Copy without re-encoding
         .outputOptions([
           '-avoid_negative_ts', 'make_zero',
-          '-fflags', '+genpts'
+          '-fflags', '+genpts',
+          '-y'                    // Overwrite output files
         ])
-        .output(outputPath)
+        .output(outputPath);
+
+      // Add final concatenation timeout
+      const concatTimeout = setTimeout(() => {
+        console.error('🎥 FFMPEG: Final concatenation timeout', {
+          projectId,
+          processingTimeMs: Date.now() - processingStartTime
+        });
+        finalCommand.kill('SIGKILL');
+        reject(new Error('Final concatenation timeout'));
+      }, 2 * 60 * 1000); // 2 minute timeout for concatenation
+
+      finalCommand
         .on('start', (commandLine) => {
-          console.log('Final concat command:', commandLine);
+          console.log('🎥 FFMPEG: Final concatenation started', {
+            projectId,
+            command: commandLine,
+            timestamp: new Date().toISOString()
+          });
         })
         .on('progress', (progress) => {
+          console.log('🎥 FFMPEG: Final concatenation progress', {
+            projectId,
+            progress: `${(progress.percent || 0).toFixed(1)}%`,
+            timemark: progress.timemark
+          });
+          
           const concatProgress = 75 + (progress.percent || 0) * 0.2;
           updateProgress(projectId, 'processing', Math.min(95, Math.round(concatProgress)));
         })
         .on('end', async () => {
-          console.log('Final concatenation completed successfully');
+          clearTimeout(concatTimeout);
+          clearTimeout(processingTimeout);
+          
+          const totalProcessingTime = Date.now() - processingStartTime;
+          console.log('🎥 FFMPEG: Final concatenation completed successfully', {
+            projectId,
+            outputPath,
+            totalProcessingTimeMs: totalProcessingTime,
+            timestamp: new Date().toISOString()
+          });
           
           // Clean up temporary files
           try {
@@ -153,15 +310,30 @@ async function processVideoWithBeats(inputVideos, beatMarkers, outputPath, proje
             for (const segPath of segmentPaths) {
               await fs.unlink(segPath);
             }
-            console.log('Temporary files cleaned up');
+            console.log('🎥 FFMPEG: Temporary files cleaned up', {
+              projectId,
+              filesRemoved: segmentPaths.length + 1
+            });
           } catch (cleanupError) {
-            console.warn('Some temporary files could not be cleaned up:', cleanupError);
+            console.warn('🎥 FFMPEG: Some temporary files could not be cleaned up', {
+              projectId,
+              error: cleanupError.message
+            });
           }
           
           resolve(outputPath);
         })
         .on('error', async (error) => {
-          console.error('Final concatenation failed:', error);
+          clearTimeout(concatTimeout);
+          clearTimeout(processingTimeout);
+          
+          const totalProcessingTime = Date.now() - processingStartTime;
+          console.error('🎥 FFMPEG: Final concatenation failed', {
+            projectId,
+            error: error.message,
+            totalProcessingTimeMs: totalProcessingTime,
+            timestamp: new Date().toISOString()
+          });
           
           // Clean up on error
           try {
@@ -170,64 +342,73 @@ async function processVideoWithBeats(inputVideos, beatMarkers, outputPath, proje
               await fs.unlink(segPath);
             }
           } catch (cleanupError) {
-            console.warn('Could not clean up after error:', cleanupError);
+            console.warn('🎥 FFMPEG: Could not clean up after error', {
+              projectId,
+              error: cleanupError.message
+            });
           }
           
           reject(error);
         })
         .run();
     })
-    .catch(reject);
+    .catch((error) => {
+      clearTimeout(processingTimeout);
+      console.error('🎥 FFMPEG: Segment processing failed', {
+        projectId,
+        error: error.message,
+        processingTimeMs: Date.now() - processingStartTime
+      });
+      reject(error);
+    });
   });
 }
 
 // Process jobs from the queue
 videoQueue.process('process-video', async (job) => {
   const { projectId } = job.data;
+  const jobStartTime = Date.now();
   
-  console.log(`🎬 WORKER: Job ${job.id} started for project: ${projectId}`);
+  console.log('⚙️ WORKER: Starting job processing', {
+    jobId: job.id,
+    projectId,
+    jobData: job.data,
+    timestamp: new Date().toISOString()
+  });
   
   try {
-    console.log(`🚀 Starting OPTIMIZED video processing for project: ${projectId}`);
-    
     // Update project status
-    console.log('📝 Updating project status to processing with 5% progress...');
     await updateProgress(projectId, 'processing', 5);
 
     // Get project details
-    console.log('🔍 Fetching project details from database...');
+    console.log('⚙️ WORKER: Fetching project from database', { projectId });
     const project = await prisma.project.findUnique({
       where: { id: projectId }
     });
 
     if (!project) {
-      console.log('❌ Project not found in database');
       throw new Error('Project not found');
     }
 
-    console.log('✅ Project data retrieved:', {
-      inputVideos: project.inputVideos?.length,
-      beatMarkers: project.beatMarkers?.length,
-      projectName: project.name
+    console.log('⚙️ WORKER: Project loaded successfully', {
+      projectId,
+      projectName: project.name,
+      inputVideosCount: project.inputVideos?.length || 0,
+      beatMarkersCount: project.beatMarkers?.length || 0,
+      status: project.status
     });
-    console.log('📊 Input videos details:', project.inputVideos);
-    console.log('🎵 Beat markers:', project.beatMarkers);
 
     // Validate project data
     if (!project.inputVideos || !Array.isArray(project.inputVideos) || project.inputVideos.length === 0) {
-      console.log('❌ No input videos found in project');
       throw new Error('No input videos found in project');
     }
 
     if (!project.beatMarkers || !Array.isArray(project.beatMarkers) || project.beatMarkers.length < 2) {
-      console.log('❌ Not enough beat markers');
       throw new Error('Need at least 2 beat markers to create video segments');
     }
 
-    console.log('✅ Project data validation passed');
-
     // Try multiple output directories for Railway compatibility
-    console.log('📂 Setting up output directories...');
+    console.log('⚙️ WORKER: Setting up output directory');
     const possibleOutputDirs = [
       path.join('/tmp', 'exports'),
       path.join(process.cwd(), 'tmp', 'exports'),
@@ -240,9 +421,7 @@ videoQueue.process('process-video', async (job) => {
     // Try to create output directory in different locations
     for (const tryDir of possibleOutputDirs) {
       try {
-        console.log(`📂 Trying directory: ${tryDir}`);
         await fs.mkdir(tryDir, { recursive: true });
-        
         // Test write permissions
         const testFile = path.join(tryDir, 'test.txt');
         await fs.writeFile(testFile, 'test');
@@ -250,49 +429,56 @@ videoQueue.process('process-video', async (job) => {
         
         outputDir = tryDir;
         outputPath = path.join(tryDir, `${projectId}.mp4`);
-        console.log(`✅ Using output directory: ${outputDir}`);
+        console.log('⚙️ WORKER: Output directory confirmed', {
+          projectId,
+          outputDir,
+          outputPath
+        });
         break;
       } catch (error) {
-        console.log(`❌ Cannot use directory: ${tryDir}`, error.message);
+        console.log('⚙️ WORKER: Cannot use directory', {
+          directory: tryDir,
+          error: error.message
+        });
         continue;
       }
     }
 
     if (!outputPath) {
-      console.log('❌ Cannot create output directory in any location');
       throw new Error('Cannot create output directory in any location');
     }
 
     // Process the video with optimized settings
-    console.log('🎬 Starting video processing with beats...');
+    console.log('⚙️ WORKER: Starting video processing', { projectId });
     await updateProgress(projectId, 'processing', 10);
     await processVideoWithBeats(project.inputVideos, project.beatMarkers, outputPath, projectId);
-    console.log('✅ Video processing completed');
 
     // Verify file exists and has reasonable size
-    console.log('🔍 Verifying output file...');
+    console.log('⚙️ WORKER: Verifying output file', { outputPath });
     try {
       const stats = await fs.stat(outputPath);
-      console.log(`✅ Output file created: ${outputPath} (${(stats.size / 1024 / 1024).toFixed(2)} MB)`);
+      console.log('⚙️ WORKER: Output file verified', {
+        projectId,
+        outputPath,
+        fileSizeMB: (stats.size / 1024 / 1024).toFixed(2),
+        fileSizeBytes: stats.size
+      });
       
       if (stats.size < 1000) { // Less than 1KB is suspicious
         throw new Error('Output file is too small, processing may have failed');
       }
     } catch (error) {
-      console.log('❌ Output file verification failed:', error.message);
       throw new Error(`Output file verification failed: ${error.message}`);
     }
 
     // Update progress to completion
-    console.log('📝 Updating progress to 98%...');
     await updateProgress(projectId, 'processing', 98);
 
     // Set up download URL
     const outputUrl = `/api/download/${projectId}`;
-    console.log('🌐 Generated download URL:', outputUrl);
 
     // Update project with success
-    console.log('📝 Updating project status to completed...');
+    console.log('⚙️ WORKER: Updating project status to completed', { projectId });
     await prisma.project.update({
       where: { id: projectId },
       data: {
@@ -302,18 +488,29 @@ videoQueue.process('process-video', async (job) => {
       }
     });
 
-    console.log(`🎉 OPTIMIZED video processing completed for project: ${projectId}`);
+    const totalJobTime = Date.now() - jobStartTime;
+    console.log('⚙️ WORKER: Job completed successfully', {
+      jobId: job.id,
+      projectId,
+      outputUrl,
+      totalProcessingTimeMs: totalJobTime,
+      timestamp: new Date().toISOString()
+    });
+    
     return { success: true, outputUrl };
 
   } catch (error) {
-    console.error(`💥 Video processing failed for project: ${projectId}`, error);
-    console.error('Worker error details:', {
-      message: error instanceof Error ? error.message : 'Unknown error',
-      stack: error instanceof Error ? error.stack : 'No stack trace'
+    const totalJobTime = Date.now() - jobStartTime;
+    console.error('⚙️ WORKER: Job processing failed', {
+      jobId: job.id,
+      projectId,
+      error: error.message,
+      stack: error.stack,
+      totalProcessingTimeMs: totalJobTime,
+      timestamp: new Date().toISOString()
     });
     
     // Update project with error
-    console.log('📝 Updating project status to error...');
     await prisma.project.update({
       where: { id: projectId },
       data: { 
@@ -328,7 +525,14 @@ videoQueue.process('process-video', async (job) => {
 
 // Handle failed jobs with better logging
 videoQueue.on('failed', async (job, error) => {
-  console.error(`Job ${job.id} failed for project ${job.data?.projectId}:`, error);
+  console.error('⚙️ WORKER: Job failed', {
+    jobId: job.id,
+    projectId: job.data?.projectId,
+    error: error.message,
+    attempts: job.attemptsMade,
+    maxAttempts: job.opts.attempts,
+    timestamp: new Date().toISOString()
+  });
   
   // Update project status on failure
   if (job.data.projectId) {
@@ -341,14 +545,34 @@ videoQueue.on('failed', async (job, error) => {
         }
       });
     } catch (updateError) {
-      console.error('Failed to update project status:', updateError);
+      console.error('⚙️ WORKER: Failed to update project status on job failure', {
+        projectId: job.data.projectId,
+        error: updateError.message
+      });
     }
   }
 });
 
 // Add job completion logging
 videoQueue.on('completed', (job) => {
-  console.log(`Job ${job.id} completed successfully for project ${job.data?.projectId}`);
+  console.log('⚙️ WORKER: Job completed successfully', {
+    jobId: job.id,
+    projectId: job.data?.projectId,
+    returnValue: job.returnvalue,
+    timestamp: new Date().toISOString()
+  });
 });
 
-console.log('OPTIMIZED video processing worker is running...'); 
+// Add job progress logging
+videoQueue.on('progress', (job, progress) => {
+  console.log('⚙️ WORKER: Job progress update', {
+    jobId: job.id,
+    projectId: job.data?.projectId,
+    progress: `${progress}%`
+  });
+});
+
+console.log('⚙️ WORKER: OPTIMIZED video processing worker is running...', {
+  timestamp: new Date().toISOString(),
+  environment: process.env.NODE_ENV || 'development'
+}); 
