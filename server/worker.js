@@ -185,37 +185,49 @@ async function processVideoWithBeats(inputVideos, beatMarkers, outputPath, proje
 videoQueue.process('process-video', async (job) => {
   const { projectId } = job.data;
   
+  console.log(`🎬 WORKER: Job ${job.id} started for project: ${projectId}`);
+  
   try {
-    console.log(`Starting OPTIMIZED video processing for project: ${projectId}`);
+    console.log(`🚀 Starting OPTIMIZED video processing for project: ${projectId}`);
     
     // Update project status
+    console.log('📝 Updating project status to processing with 5% progress...');
     await updateProgress(projectId, 'processing', 5);
 
     // Get project details
+    console.log('🔍 Fetching project details from database...');
     const project = await prisma.project.findUnique({
       where: { id: projectId }
     });
 
     if (!project) {
+      console.log('❌ Project not found in database');
       throw new Error('Project not found');
     }
 
-    console.log('Project data:', {
+    console.log('✅ Project data retrieved:', {
       inputVideos: project.inputVideos?.length,
       beatMarkers: project.beatMarkers?.length,
       projectName: project.name
     });
+    console.log('📊 Input videos details:', project.inputVideos);
+    console.log('🎵 Beat markers:', project.beatMarkers);
 
     // Validate project data
     if (!project.inputVideos || !Array.isArray(project.inputVideos) || project.inputVideos.length === 0) {
+      console.log('❌ No input videos found in project');
       throw new Error('No input videos found in project');
     }
 
     if (!project.beatMarkers || !Array.isArray(project.beatMarkers) || project.beatMarkers.length < 2) {
+      console.log('❌ Not enough beat markers');
       throw new Error('Need at least 2 beat markers to create video segments');
     }
 
+    console.log('✅ Project data validation passed');
+
     // Try multiple output directories for Railway compatibility
+    console.log('📂 Setting up output directories...');
     const possibleOutputDirs = [
       path.join('/tmp', 'exports'),
       path.join(process.cwd(), 'tmp', 'exports'),
@@ -228,7 +240,9 @@ videoQueue.process('process-video', async (job) => {
     // Try to create output directory in different locations
     for (const tryDir of possibleOutputDirs) {
       try {
+        console.log(`📂 Trying directory: ${tryDir}`);
         await fs.mkdir(tryDir, { recursive: true });
+        
         // Test write permissions
         const testFile = path.join(tryDir, 'test.txt');
         await fs.writeFile(testFile, 'test');
@@ -236,41 +250,49 @@ videoQueue.process('process-video', async (job) => {
         
         outputDir = tryDir;
         outputPath = path.join(tryDir, `${projectId}.mp4`);
-        console.log(`Using output directory: ${outputDir}`);
+        console.log(`✅ Using output directory: ${outputDir}`);
         break;
       } catch (error) {
-        console.log(`Cannot use directory: ${tryDir}`, error.message);
+        console.log(`❌ Cannot use directory: ${tryDir}`, error.message);
         continue;
       }
     }
 
     if (!outputPath) {
+      console.log('❌ Cannot create output directory in any location');
       throw new Error('Cannot create output directory in any location');
     }
 
     // Process the video with optimized settings
+    console.log('🎬 Starting video processing with beats...');
     await updateProgress(projectId, 'processing', 10);
     await processVideoWithBeats(project.inputVideos, project.beatMarkers, outputPath, projectId);
+    console.log('✅ Video processing completed');
 
     // Verify file exists and has reasonable size
+    console.log('🔍 Verifying output file...');
     try {
       const stats = await fs.stat(outputPath);
-      console.log(`Output file created: ${outputPath} (${(stats.size / 1024 / 1024).toFixed(2)} MB)`);
+      console.log(`✅ Output file created: ${outputPath} (${(stats.size / 1024 / 1024).toFixed(2)} MB)`);
       
       if (stats.size < 1000) { // Less than 1KB is suspicious
         throw new Error('Output file is too small, processing may have failed');
       }
     } catch (error) {
+      console.log('❌ Output file verification failed:', error.message);
       throw new Error(`Output file verification failed: ${error.message}`);
     }
 
     // Update progress to completion
+    console.log('📝 Updating progress to 98%...');
     await updateProgress(projectId, 'processing', 98);
 
     // Set up download URL
     const outputUrl = `/api/download/${projectId}`;
+    console.log('🌐 Generated download URL:', outputUrl);
 
     // Update project with success
+    console.log('📝 Updating project status to completed...');
     await prisma.project.update({
       where: { id: projectId },
       data: {
@@ -280,13 +302,18 @@ videoQueue.process('process-video', async (job) => {
       }
     });
 
-    console.log(`OPTIMIZED video processing completed for project: ${projectId}`);
+    console.log(`🎉 OPTIMIZED video processing completed for project: ${projectId}`);
     return { success: true, outputUrl };
 
   } catch (error) {
-    console.error(`Video processing failed for project: ${projectId}`, error);
+    console.error(`💥 Video processing failed for project: ${projectId}`, error);
+    console.error('Worker error details:', {
+      message: error instanceof Error ? error.message : 'Unknown error',
+      stack: error instanceof Error ? error.stack : 'No stack trace'
+    });
     
     // Update project with error
+    console.log('📝 Updating project status to error...');
     await prisma.project.update({
       where: { id: projectId },
       data: { 

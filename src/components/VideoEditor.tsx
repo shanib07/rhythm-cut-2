@@ -241,16 +241,23 @@ export const VideoEditor: React.FC = () => {
   });
 
   const handleExport = async () => {
+    console.log('🚀 EXPORT STARTED - handleExport called');
+    console.log('Videos available:', clips.length);
+    console.log('Beat markers:', sortedBeats.length, sortedBeats.map(b => b.time));
+    
     if (clips.length === 0) {
+      console.log('❌ Export failed: No clips');
       toast.error('Please add some video clips first');
       return;
     }
 
     if (sortedBeats.length < 2) {
+      console.log('❌ Export failed: Not enough beat markers');
       toast.error('Please add at least one beat marker');
       return;
     }
 
+    console.log('✅ Validation passed, starting export process...');
     setIsProcessing(true);
     setExportProgress({
       status: 'uploading',
@@ -268,17 +275,27 @@ export const VideoEditor: React.FC = () => {
 
       const beatMarkers = sortedBeats.map(beat => beat.time);
 
+      console.log('📁 Videos prepared for processing:', videosForProcessing.map(v => ({ 
+        id: v.id, 
+        fileName: v.file.name, 
+        fileSize: v.file.size 
+      })));
+      console.log('🎵 Beat markers prepared:', beatMarkers);
+
       setExportProgress(prev => ({
         ...prev,
         message: 'Starting server-side processing...'
       }));
 
+      console.log('🌐 About to call processVideoWithBeats...');
+      
       // Use the server-side processing function
       const outputUrl = await processVideoWithBeats(
         videosForProcessing,
         beatMarkers,
         `Rhythm Cut Export - ${new Date().toISOString()}`,
         (progress) => {
+          console.log(`📈 Progress update: ${Math.round(progress * 100)}%`);
           setExportProgress(prev => ({
             ...prev,
             progress: Math.round(progress * 100),
@@ -287,6 +304,9 @@ export const VideoEditor: React.FC = () => {
           }));
         }
       );
+
+      console.log('✅ processVideoWithBeats completed successfully!');
+      console.log('📥 Output URL received:', outputUrl);
 
       setExportUrl(outputUrl);
       setExportProgress({
@@ -306,8 +326,15 @@ export const VideoEditor: React.FC = () => {
       downloadLink.click();
       document.body.removeChild(downloadLink);
 
+      console.log('💾 Download triggered successfully');
+
     } catch (error) {
-      console.error('Export failed:', error);
+      console.error('💥 Export failed with error:', error);
+      console.error('Error details:', {
+        message: error instanceof Error ? error.message : 'Unknown error',
+        stack: error instanceof Error ? error.stack : 'No stack trace'
+      });
+      
       toast.error(`Export failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
       setExportProgress({
         status: 'error',
@@ -316,6 +343,7 @@ export const VideoEditor: React.FC = () => {
         projectId: null
       });
     } finally {
+      console.log('🏁 Export process finished, cleaning up...');
       setIsProcessing(false);
     }
   };
