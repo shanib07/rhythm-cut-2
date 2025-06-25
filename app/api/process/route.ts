@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import Queue from 'bull';
 import { PrismaClient } from '@prisma/client';
-import { getServerSession } from 'next-auth';
 
 const prisma = new PrismaClient();
 
@@ -19,20 +18,19 @@ const videoQueue = new Queue('video-processing', process.env.REDIS_URL);
 
 export async function POST(req: NextRequest) {
   try {
-    // Get authenticated user
-    const session = await getServerSession();
-    if (!session?.user?.email) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
+    console.log('Processing request received');
+    
     const body = await req.json();
+    console.log('Request body:', JSON.stringify(body, null, 2));
+    
     const { name, inputVideos, beatMarkers } = body;
 
     // Validate input
     if (!name || !inputVideos || !beatMarkers || 
         !Array.isArray(inputVideos) || !Array.isArray(beatMarkers)) {
+      console.error('Invalid input data:', { name, inputVideos: !!inputVideos, beatMarkers: !!beatMarkers });
       return NextResponse.json(
-        { error: 'Invalid input data' }, 
+        { error: 'Invalid input data. Missing name, inputVideos, or beatMarkers.' }, 
         { status: 400 }
       );
     }
@@ -45,21 +43,27 @@ export async function POST(req: NextRequest) {
     );
 
     if (!validVideos) {
+      console.error('Invalid video input format:', inputVideos);
       return NextResponse.json(
         { error: 'Invalid video input format' },
         { status: 400 }
       );
     }
 
-    // Get or create user
+    console.log(`Processing ${inputVideos.length} videos with ${beatMarkers.length} beat markers`);
+
+    // Create a default user for now (remove when auth is properly implemented)
+    const defaultEmail = 'anonymous@rhythmcut.com';
     const user = await prisma.user.upsert({
-      where: { email: session.user.email },
+      where: { email: defaultEmail },
       update: {},
       create: {
-        email: session.user.email,
-        name: session.user.name || 'Anonymous'
+        email: defaultEmail,
+        name: 'Anonymous User'
       }
     });
+
+    console.log('User found/created:', user.id);
 
     // Create new project
     const project = await prisma.project.create({
@@ -72,10 +76,19 @@ export async function POST(req: NextRequest) {
       }
     });
 
-    // Add job to queue
-    await videoQueue.add('process-video', {
-      projectId: project.id
-    });
+    console.log('Project created:', project.id);
+
+    // Add job to queue with detailed logging
+    try {
+      const job = await videoQueue.add('process-video', {
+        projectId: project.id
+      });
+      console.log('Job added to queue:', job.id);
+    } catch (queueError) {
+      console.error('Failed to add job to queue:', queueError);
+      const errorMessage = queueError instanceof Error ? queueError.message : 'Unknown queue error';
+      throw new Error(`Queue error: ${errorMessage}`);
+    }
 
     return NextResponse.json({
       success: true,
@@ -85,9 +98,15 @@ export async function POST(req: NextRequest) {
 
   } catch (error) {
     console.error('Processing request failed:', error);
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    );
+    
+    // Return more detailed error information
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    const errorDetails = {
+      error: 'Internal server error',
+      details: errorMessage,
+      timestamp: new Date().toISOString()
+    };
+    
+    return NextResponse.json(errorDetails, { status: 500 });
   }
 } 
