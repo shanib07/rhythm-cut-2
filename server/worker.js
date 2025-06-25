@@ -10,7 +10,7 @@ const prisma = new PrismaClient();
 const videoQueue = new Queue('video-processing', process.env.REDIS_URL);
 
 // Process videos based on beat markers
-async function processVideoWithBeats(inputVideos, beatMarkers, outputPath) {
+async function processVideoWithBeats(inputVideos, beatMarkers, outputPath, projectId) {
   return new Promise((resolve, reject) => {
     console.log('Processing video with beats');
     console.log(`Videos: ${inputVideos.length}, Beats: ${beatMarkers.length}`);
@@ -67,6 +67,11 @@ async function processVideoWithBeats(inputVideos, beatMarkers, outputPath) {
             '-avoid_negative_ts', 'make_zero'
           ])
           .output(segmentPath)
+          .on('progress', (progress) => {
+            // Update progress for segment processing
+            const segmentProgress = 15 + (index / segments.length) * 50 + (progress.percent || 0) / segments.length * 0.5;
+            updateProgress(projectId, 'processing', Math.min(65, Math.round(segmentProgress)));
+          })
           .on('end', () => {
             console.log(`Segment ${index} completed`);
             segResolve(segmentPath);
@@ -105,6 +110,12 @@ async function processVideoWithBeats(inputVideos, beatMarkers, outputPath) {
         .output(outputPath)
         .on('start', (commandLine) => {
           console.log('Concat command:', commandLine);
+          updateProgress(projectId, 'processing', 70);
+        })
+        .on('progress', (progress) => {
+          // Update progress for concatenation
+          const concatProgress = 70 + (progress.percent || 0) * 0.25;
+          updateProgress(projectId, 'processing', Math.min(95, Math.round(concatProgress)));
         })
         .on('end', async () => {
           console.log('Concatenation completed');
@@ -130,6 +141,19 @@ async function processVideoWithBeats(inputVideos, beatMarkers, outputPath) {
   });
 }
 
+// Helper function to update progress
+async function updateProgress(projectId, status, progress) {
+  try {
+    await prisma.project.update({
+      where: { id: projectId },
+      data: { status, progress }
+    });
+    console.log(`Project ${projectId}: ${status} - ${progress}%`);
+  } catch (error) {
+    console.error('Failed to update progress:', error);
+  }
+}
+
 // Process jobs from the queue
 videoQueue.process('process-video', async (job) => {
   const { projectId } = job.data;
@@ -138,10 +162,7 @@ videoQueue.process('process-video', async (job) => {
     console.log(`Starting video processing for project: ${projectId}`);
     
     // Update project status
-    await prisma.project.update({
-      where: { id: projectId },
-      data: { status: 'processing' }
-    });
+    await updateProgress(projectId, 'processing', 5);
 
     // Get project details
     const project = await prisma.project.findUnique({
@@ -157,17 +178,55 @@ videoQueue.process('process-video', async (job) => {
       beatMarkers: project.beatMarkers?.length
     });
 
-    // Create temp output directory if it doesn't exist
-    const outputDir = path.join(__dirname, '../tmp/exports');
-    await fs.mkdir(outputDir, { recursive: true });
-    
-    const outputPath = path.join(outputDir, `${projectId}.mp4`);
+    // Try multiple output directories for Railway compatibility
+    const possibleOutputDirs = [
+      path.join('/tmp', 'exports'),
+      path.join(process.cwd(), 'tmp', 'exports'),
+      path.join(process.cwd(), 'public', 'exports')
+    ];
 
-    // Process the video
-    await processVideoWithBeats(project.inputVideos, project.beatMarkers, outputPath);
+    let outputDir = null;
+    let outputPath = null;
+
+    // Try to create output directory in different locations
+    for (const tryDir of possibleOutputDirs) {
+      try {
+        await fs.mkdir(tryDir, { recursive: true });
+        // Test write permissions
+        const testFile = path.join(tryDir, 'test.txt');
+        await fs.writeFile(testFile, 'test');
+        await fs.unlink(testFile);
+        
+        outputDir = tryDir;
+        outputPath = path.join(tryDir, `${projectId}.mp4`);
+        console.log(`Using output directory: ${outputDir}`);
+        break;
+      } catch (error) {
+        console.log(`Cannot use directory: ${tryDir}`, error.message);
+        continue;
+      }
+    }
+
+    if (!outputPath) {
+      throw new Error('Cannot create output directory in any location');
+    }
+
+    // Process the video with progress tracking
+    await updateProgress(projectId, 'processing', 10);
+    await processVideoWithBeats(project.inputVideos, project.beatMarkers, outputPath, projectId);
+
+    // Verify file exists
+    try {
+      await fs.access(outputPath);
+      console.log(`Output file created successfully: ${outputPath}`);
+    } catch (error) {
+      throw new Error(`Output file not created: ${outputPath}`);
+    }
+
+    // Update progress to near completion
+    await updateProgress(projectId, 'processing', 95);
 
     // For now, serve the file directly
-    // In production, upload to cloud storage
     const outputUrl = `/api/download/${projectId}`;
 
     // Update project with success
@@ -175,6 +234,7 @@ videoQueue.process('process-video', async (job) => {
       where: { id: projectId },
       data: {
         status: 'completed',
+        progress: 100,
         outputUrl
       }
     });
@@ -188,7 +248,10 @@ videoQueue.process('process-video', async (job) => {
     // Update project with error
     await prisma.project.update({
       where: { id: projectId },
-      data: { status: 'error' }
+      data: { 
+        status: 'error',
+        progress: 0
+      }
     });
 
     throw error;

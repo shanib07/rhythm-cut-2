@@ -6,6 +6,7 @@ import { useVideoStore } from '../stores/videoStore';
 import { generateUniqueId } from '../utils/videoUtils';
 import { VideoClip, BeatMarker, TimelineSegment } from '../types';
 import { toast } from 'sonner';
+import { ProgressBar } from './ProgressBar';
 
 export const VideoEditor: React.FC = () => {
   const {
@@ -39,6 +40,12 @@ export const VideoEditor: React.FC = () => {
   const recordedChunksRef = useRef<Blob[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
   const [exportUrl, setExportUrl] = useState<string | null>(null);
+  const [exportProgress, setExportProgress] = useState({
+    status: 'idle',
+    progress: 0,
+    message: '',
+    projectId: null as string | null
+  });
 
   const handleAddBeat = () => {
     const time = parseFloat(newBeatTime);
@@ -258,18 +265,37 @@ export const VideoEditor: React.FC = () => {
 
   const handleExport = async () => {
     setIsProcessing(true);
+    setExportProgress({
+      status: 'uploading',
+      progress: 0,
+      message: 'Preparing export...',
+      projectId: null
+    });
+
     try {
-      // Upload video files first
-      const uploadedVideos = await Promise.all(
-        clips.map(async (clip) => {
-          const serverUrl = await uploadVideoFile(clip.file);
-          return {
-            id: clip.id,
-            url: serverUrl,
-            duration: clip.duration
-          };
-        })
-      );
+      // Upload video files with progress tracking
+      const uploadedVideos = [];
+      for (let i = 0; i < clips.length; i++) {
+        const clip = clips[i];
+        setExportProgress(prev => ({
+          ...prev,
+          progress: Math.round((i / clips.length) * 5), // Upload takes up to 5%
+          message: `Uploading video ${i + 1} of ${clips.length}...`
+        }));
+        
+        const serverUrl = await uploadVideoFile(clip.file);
+        uploadedVideos.push({
+          id: clip.id,
+          url: serverUrl,
+          duration: clip.duration
+        });
+      }
+
+      setExportProgress(prev => ({
+        ...prev,
+        progress: 5,
+        message: 'Starting video processing...'
+      }));
 
       const response = await fetch('/api/process', {
         method: 'POST',
@@ -285,33 +311,53 @@ export const VideoEditor: React.FC = () => {
 
       const data = await response.json();
       if (data.success && data.projectId) {
-        // Poll for project completion
-        const checkProjectStatus = async () => {
-          const project = await fetch(`/api/project/${data.projectId}`);
-          const projectData = await project.json();
+        setExportProgress(prev => ({
+          ...prev,
+          projectId: data.projectId,
+          status: 'processing',
+          progress: 10,
+          message: 'Processing video...'
+        }));
 
-          if (projectData.status === 'completed' && projectData.outputUrl) {
-            setExportUrl(projectData.outputUrl);
-            toast.success('Video exported successfully!');
-            setIsProcessing(false);
-            
-            // Automatically trigger download
-            const downloadLink = document.createElement('a');
-            downloadLink.href = projectData.outputUrl;
-            downloadLink.download = `rhythm-cut-${Date.now()}.mp4`;
-            document.body.appendChild(downloadLink);
-            downloadLink.click();
-            document.body.removeChild(downloadLink);
-          } else if (projectData.status === 'error') {
-            throw new Error('Export failed');
-          } else {
-            // Continue polling
-            setTimeout(checkProjectStatus, 1000);
+        // Poll for project progress
+        const checkProjectProgress = async () => {
+          try {
+            const progressResponse = await fetch(`/api/progress/${data.projectId}`);
+            const progressData = await progressResponse.json();
+
+            setExportProgress(prev => ({
+              ...prev,
+              status: progressData.status,
+              progress: progressData.progress || prev.progress,
+              message: progressData.message || prev.message
+            }));
+
+            if (progressData.status === 'completed' && progressData.outputUrl) {
+              setExportUrl(progressData.outputUrl);
+              toast.success('Video exported successfully!');
+              setIsProcessing(false);
+              
+              // Automatically trigger download
+              const downloadLink = document.createElement('a');
+              downloadLink.href = progressData.outputUrl;
+              downloadLink.download = `rhythm-cut-${Date.now()}.mp4`;
+              document.body.appendChild(downloadLink);
+              downloadLink.click();
+              document.body.removeChild(downloadLink);
+            } else if (progressData.status === 'error') {
+              throw new Error('Export failed');
+            } else {
+              // Continue polling
+              setTimeout(checkProjectProgress, 500); // Poll every 500ms for smoother updates
+            }
+          } catch (progressError) {
+            console.error('Progress check failed:', progressError);
+            setTimeout(checkProjectProgress, 1000); // Fall back to slower polling on error
           }
         };
 
-        // Start polling
-        checkProjectStatus();
+        // Start progress polling
+        checkProjectProgress();
       } else {
         throw new Error(data.error || 'Export failed');
       }
@@ -319,6 +365,11 @@ export const VideoEditor: React.FC = () => {
       console.error('Export failed:', error);
       toast.error('Failed to export video');
       setIsProcessing(false);
+      setExportProgress(prev => ({
+        ...prev,
+        status: 'error',
+        message: 'Export failed. Please try again.'
+      }));
     }
   };
 
@@ -540,8 +591,18 @@ export const VideoEditor: React.FC = () => {
         </button>
       </div>
 
-      {/* Export URL */}
-      {exportUrl && (
+      {/* Export Progress */}
+      {isProcessing && exportProgress.status !== 'idle' && (
+        <ProgressBar
+          status={exportProgress.status}
+          progress={exportProgress.progress}
+          message={exportProgress.message}
+          className="mt-4"
+        />
+      )}
+
+      {/* Export URL - fallback download button */}
+      {exportUrl && !isProcessing && (
         <div className="mt-4 p-4 bg-white/10 rounded-lg">
           <div className="flex items-center justify-between">
             <span className="text-green-400">Export complete!</span>

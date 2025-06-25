@@ -24,7 +24,8 @@ model Project {
   name        String
   userId      String
   user        User     @relation(fields: [userId], references: [id])
-  status      String   @default("pending") // pending, processing, completed, error
+  status      String   @default("pending") // pending, uploading, processing, completed, error
+  progress    Int      @default(0) // Progress percentage (0-100)
   beatMarkers Float[]  // Array of timestamps in seconds
   inputVideos Json     // Array of video inputs as JSON
   outputUrl   String?  // Final processed video URL

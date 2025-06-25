@@ -49,27 +49,53 @@ export async function GET(
         { status: 400 }
       );
     }
+
+    // Try multiple potential file locations
+    const possiblePaths = [
+      path.join(process.cwd(), 'tmp', 'exports', `${projectId}.mp4`),
+      path.join('/tmp', 'exports', `${projectId}.mp4`),
+      path.join(process.cwd(), 'public', 'exports', `${projectId}.mp4`),
+    ];
     
-    // Get the file path
-    const filePath = path.join(process.cwd(), 'tmp', 'exports', `${projectId}.mp4`);
-    
-    try {
-      const fileData = await fs.readFile(filePath);
-      
-      return new Response(fileData, {
-        headers: {
-          'Content-Type': 'video/mp4',
-          'Content-Disposition': `attachment; filename="${project.name || 'video'}.mp4"`,
-          'Content-Length': fileData.length.toString(),
-        },
-      });
-    } catch (error) {
-      console.error('Error reading video file:', error);
+    let fileData: Buffer | null = null;
+    let filePath: string | null = null;
+
+    // Try to find the file in different locations
+    for (const tryPath of possiblePaths) {
+      try {
+        await fs.access(tryPath);
+        fileData = await fs.readFile(tryPath);
+        filePath = tryPath;
+        break;
+      } catch (error) {
+        console.log(`File not found at: ${tryPath}`);
+        continue;
+      }
+    }
+
+    if (!fileData) {
+      console.error('Video file not found in any location');
       return NextResponse.json(
-        { error: 'Video file not found' },
+        { error: 'Video file not found. It may have been cleaned up due to Railway\'s ephemeral storage.' },
         { status: 404 }
       );
     }
+    
+    // Clean up the file after sending (optional, since Railway cleans up anyway)
+    if (filePath) {
+      fs.unlink(filePath).catch(err => 
+        console.log('Failed to cleanup file:', err.message)
+      );
+    }
+    
+    return new Response(fileData, {
+      headers: {
+        'Content-Type': 'video/mp4',
+        'Content-Disposition': `attachment; filename="${project.name || 'rhythm-cut-video'}.mp4"`,
+        'Content-Length': fileData.length.toString(),
+        'Cache-Control': 'no-cache',
+      },
+    });
     
   } catch (error) {
     console.error('Download failed:', error);
