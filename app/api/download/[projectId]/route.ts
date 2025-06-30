@@ -21,6 +21,33 @@ export async function GET(
       );
     }
     
+    // First, check if this is a direct export (file exists in exports directory)
+    const exportPath = path.join(process.cwd(), 'public', 'exports', `${projectId}.mp4`);
+    try {
+      await fs.access(exportPath);
+      // File exists, return it directly
+      const fileData = await fs.readFile(exportPath);
+      
+      // Optional: Clean up the file after sending
+      setTimeout(() => {
+        fs.unlink(exportPath).catch(err => 
+          console.log('Failed to cleanup export file:', err.message)
+        );
+      }, 5000); // Clean up after 5 seconds
+      
+      return new Response(fileData, {
+        headers: {
+          'Content-Type': 'video/mp4',
+          'Content-Disposition': `attachment; filename="rhythm-cut-${projectId}.mp4"`,
+          'Content-Length': fileData.length.toString(),
+          'Cache-Control': 'no-cache',
+        },
+      });
+    } catch (error) {
+      // File doesn't exist in exports, continue with database check
+      console.log('Export file not found, checking database...');
+    }
+    
     const session = await getServerSession();
     if (!session?.user?.email) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });

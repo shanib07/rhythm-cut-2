@@ -197,7 +197,7 @@ export const VideoEditor: React.FC = () => {
         
         // Preload next segment if we're near the end
         const timeUntilNextSegment = currentSegment.endTime - newTime;
-        if (timeUntilNextSegment < 0.5 && currentSegmentIndex < videoSegments.length - 1) {
+        if (timeUntilNextSegment < 0.2 && currentSegmentIndex < videoSegments.length - 1) {
           const nextSegment = videoSegments[currentSegmentIndex + 1];
           const nextClip = clips.find(clip => clip.id === nextSegment.clipId);
           
@@ -438,7 +438,7 @@ export const VideoEditor: React.FC = () => {
                 controls={false}
                 muted={true}
                 playsInline
-                preload="auto"
+                preload={activeVideoRef === 'video1' ? 'auto' : 'none'}
               />
               <video
                 ref={videoRef2}
@@ -448,7 +448,7 @@ export const VideoEditor: React.FC = () => {
                 controls={false}
                 muted={true}
                 playsInline
-                preload="auto"
+                preload={activeVideoRef === 'video2' ? 'auto' : 'none'}
               />
               
               {/* Playback controls */}

@@ -39,7 +39,7 @@ export async function POST(req: NextRequest) {
 
     const outputId = uuidv4();
     const outputPath = path.join(outputDir, `${outputId}.mp4`);
-    const outputUrl = `/exports/${outputId}.mp4`;
+    const outputUrl = `/api/download/${outputId}`;
 
     // Create segments
     const segments = [];
