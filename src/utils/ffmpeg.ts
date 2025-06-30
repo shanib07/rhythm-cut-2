@@ -564,6 +564,7 @@ export const processVideoWithBeatsDirect = async (
     onProgress?.(0.3);
 
     // Call direct processing endpoint
+    const startProcessingTime = Date.now();
     const response = await fetch('/api/process-direct', {
       method: 'POST',
       headers: {
@@ -589,9 +590,12 @@ export const processVideoWithBeatsDirect = async (
       throw new Error('Direct processing failed');
     }
 
+    const totalProcessingTime = Date.now() - startProcessingTime;
     console.log('🚀 DIRECT: Processing completed', {
       outputUrl,
-      processingTimeMs: processingTime
+      processingTimeMs: processingTime,
+      totalTimeMs: totalProcessingTime,
+      method: quality
     });
 
     onProgress?.(1.0);

@@ -552,7 +552,7 @@ export const VideoEditor: React.FC = () => {
             <div className="space-y-2 max-h-48 overflow-y-auto">
               {sortedBeats.map((beat) => (
                 <div key={beat.id} className="flex items-center justify-between bg-white p-2 rounded border">
-                  <span className="text-black font-mono">{beat.time.toFixed(2)}s</span>
+                  <span className="text-gray-800 font-mono font-semibold">{beat.time.toFixed(2)}s</span>
                   {beat.id !== 'start' && (
                     <button
                       onClick={() => storeRemoveBeat(beat.id)}
@@ -579,14 +579,14 @@ export const VideoEditor: React.FC = () => {
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg text-black"
                 disabled={isProcessing}
               >
-                <option value="fast">Fast (540p, Lower Quality)</option>
-                <option value="balanced">Balanced (720p, Recommended)</option>
-                <option value="high">High Quality (1080p, Slower)</option>
+                <option value="fast">Ultra Fast (No Re-encode, ~10x faster)</option>
+                <option value="balanced">Smart Mode (Optimized, Recommended)</option>
+                <option value="high">Maximum Quality (Full HD, Slower)</option>
               </select>
               <p className="text-xs text-gray-500 mt-1">
-                {exportQuality === 'fast' && 'Quick export at 540p resolution'}
-                {exportQuality === 'balanced' && 'Good speed and quality at 720p'}
-                {exportQuality === 'high' && 'Best quality at 1080p but takes longer'}
+                {exportQuality === 'fast' && '⚡ Copies video data directly - Extremely fast but may have minor timing variations'}
+                {exportQuality === 'balanced' && '✨ Smart encoding at cut points only - Great balance of speed and precision'}
+                {exportQuality === 'high' && '🎬 Full quality processing at 1080p - Best for final production'}
               </p>
             </div>
             
