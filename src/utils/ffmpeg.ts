@@ -507,12 +507,14 @@ export async function tryFreeMemory(): Promise<void> {
 export const processVideoWithBeatsDirect = async (
   videos: { file: File; id: string }[],
   beatMarkers: number[],
+  audioFile: File,
   projectName: string = 'Video Processing',
   onProgress?: ProgressCallback
 ): Promise<string> => {
   console.log('🚀 DIRECT: Starting direct video processing', {
     videosCount: videos.length,
     beatMarkersCount: beatMarkers.length,
+    audioFileName: audioFile.name,
     timestamp: new Date().toISOString()
   });
 
@@ -526,9 +528,13 @@ export const processVideoWithBeatsDirect = async (
       throw new Error('Need at least 2 beat markers to create video segments');
     }
 
+    if (!audioFile) {
+      throw new Error('Audio file is required');
+    }
+
     // Upload all video files first
     console.log('🚀 DIRECT: Uploading videos...');
-    onProgress?.(0.1);
+    onProgress?.(0.05);
     const uploadedVideos = [];
     
     for (let i = 0; i < videos.length; i++) {
@@ -544,11 +550,16 @@ export const processVideoWithBeatsDirect = async (
         duration: metadata.duration
       });
       
-      onProgress?.(0.1 + (i + 1) / videos.length * 0.3);
+      onProgress?.(0.05 + (i + 1) / videos.length * 0.2);
     }
 
+    // Upload audio file
+    console.log('🚀 DIRECT: Uploading audio file...');
+    onProgress?.(0.25);
+    const audioUrl = await uploadVideoFile(audioFile); // This can handle audio files too
+    
     console.log('🚀 DIRECT: Starting direct processing...');
-    onProgress?.(0.4);
+    onProgress?.(0.3);
 
     // Call direct processing endpoint
     const response = await fetch('/api/process-direct', {
@@ -559,7 +570,8 @@ export const processVideoWithBeatsDirect = async (
       body: JSON.stringify({
         name: projectName,
         inputVideos: uploadedVideos,
-        beatMarkers: beatMarkers
+        beatMarkers: beatMarkers,
+        audioUrl: audioUrl
       })
     });
 

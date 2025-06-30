@@ -18,6 +18,7 @@ export const VideoEditor: React.FC = () => {
     isLoading,
     audioUrl,
     audioBuffer,
+    audioFile,
     addClip,
     removeClip: storeRemoveClip,
     addBeat: storeAddBeat,
@@ -315,6 +316,7 @@ export const VideoEditor: React.FC = () => {
       timestamp: new Date().toISOString(),
       clipsCount: clips.length,
       beatsCount: sortedBeats.length,
+      hasAudioFile: !!audioFile,
       clips: clips.map(c => ({ id: c.id, name: c.name, duration: c.duration })),
       beatMarkers: sortedBeats.map(b => b.time)
     });
@@ -322,6 +324,12 @@ export const VideoEditor: React.FC = () => {
     if (clips.length === 0) {
       console.error('🎬 EXPORT: No clips available');
       toast.error('Please add some video clips first');
+      return;
+    }
+
+    if (!audioFile) {
+      console.error('🎬 EXPORT: No audio file available');
+      toast.error('Please upload an audio file first');
       return;
     }
 
@@ -341,7 +349,7 @@ export const VideoEditor: React.FC = () => {
     });
 
     try {
-      console.log('🎬 EXPORT: Preparing videos for processing');
+      console.log('🎬 EXPORT: Preparing videos and audio for processing');
       
       // Prepare videos for server processing
       const videosForProcessing = clips.map(clip => ({
@@ -354,6 +362,7 @@ export const VideoEditor: React.FC = () => {
       console.log('🎬 EXPORT: Calling processVideoWithBeats', {
         videosCount: videosForProcessing.length,
         beatMarkersCount: beatMarkers.length,
+        audioFileName: audioFile.name,
         projectName: `Rhythm Cut Export - ${new Date().toISOString()}`
       });
 
@@ -366,6 +375,7 @@ export const VideoEditor: React.FC = () => {
       const outputUrl = await processVideoWithBeatsDirect(
         videosForProcessing,
         beatMarkers,
+        audioFile,
         `Rhythm Cut Export - ${new Date().toISOString()}`,
         (progress) => {
           console.log('🎬 EXPORT: Progress update received', { progress: `${(progress * 100).toFixed(1)}%` });
@@ -592,14 +602,25 @@ export const VideoEditor: React.FC = () => {
                 </p>
               </div>
             ) : (
-              <button
-                onClick={handleExport}
-                disabled={clips.length === 0 || sortedBeats.length < 2}
-                className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-[#06B6D4] text-white rounded-lg hover:bg-[#0891B2] disabled:opacity-50 disabled:hover:bg-[#06B6D4]"
-              >
-                <Download size={20} />
-                Export Video
-              </button>
+              <div className="space-y-3">
+                <button
+                  onClick={handleExport}
+                  disabled={clips.length === 0 || sortedBeats.length < 2 || !audioFile}
+                  className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-[#06B6D4] text-white rounded-lg hover:bg-[#0891B2] disabled:opacity-50 disabled:hover:bg-[#06B6D4]"
+                >
+                  <Download size={20} />
+                  Export Video with Audio
+                </button>
+                
+                {(clips.length === 0 || sortedBeats.length < 2 || !audioFile) && (
+                  <p className="text-xs text-gray-500">
+                    {!audioFile && 'Upload an audio file, '}
+                    {clips.length === 0 && 'add video clips, '}
+                    {sortedBeats.length < 2 && 'add beat markers '}
+                    to enable export
+                  </p>
+                )}
+              </div>
             )}
             
             {exportUrl && (

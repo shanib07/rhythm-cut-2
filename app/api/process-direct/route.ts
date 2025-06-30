@@ -18,7 +18,7 @@ export async function POST(req: NextRequest) {
 
   try {
     const body = await req.json();
-    const { name, inputVideos, beatMarkers } = body;
+    const { name, inputVideos, beatMarkers, audioUrl } = body;
 
     // Validate input
     if (!inputVideos || !beatMarkers || inputVideos.length === 0 || beatMarkers.length < 2) {
@@ -28,9 +28,17 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    if (!audioUrl) {
+      return NextResponse.json(
+        { error: 'Audio file is required' },
+        { status: 400 }
+      );
+    }
+
     console.log('🚀 DIRECT-PROCESS: Processing request', {
       videosCount: inputVideos.length,
-      beatMarkersCount: beatMarkers.length
+      beatMarkersCount: beatMarkers.length,
+      hasAudio: !!audioUrl
     });
 
     // Create output directory
@@ -57,7 +65,7 @@ export async function POST(req: NextRequest) {
       segmentsCount: segments.length
     });
 
-    // Process segments
+    // Process segments (without audio to avoid conflicts)
     const segmentPaths: string[] = [];
     const tempDir = path.join(process.cwd(), 'tmp');
     await mkdir(tempDir, { recursive: true });
@@ -77,35 +85,33 @@ export async function POST(req: NextRequest) {
       console.log(`🚀 DIRECT-PROCESS: Processing segment ${i}/${segments.length}`);
 
       await new Promise<void>((resolve, reject) => {
-        // Use optimized settings for speed and no gaps
+        // Process video segments without audio to avoid conflicts
         const ffmpegCmd = ffmpeg(videoPath)
           .seekInput(segment.startTime)
           .inputOptions([
             '-accurate_seek',
-            '-noaccurate_seek'  // Disable for speed after initial seek
+            '-noaccurate_seek'
           ])
           .duration(segment.duration)
           .videoCodec('libx264')
-          .audioCodec('aac')
+          .noAudio() // Remove audio from video segments
           .size('1280x720')
           .outputOptions([
-            '-crf', '28',           // Higher CRF for faster encoding (23->28)
-            '-preset', 'ultrafast', // Fastest preset
-            '-tune', 'fastdecode',  // Optimize for fast decoding
-            '-threads', '0',        // Use all CPU cores
+            '-crf', '28',
+            '-preset', 'ultrafast',
+            '-tune', 'fastdecode',
+            '-threads', '0',
             '-movflags', '+faststart',
             '-avoid_negative_ts', 'make_zero',
             '-fflags', '+genpts',
-            '-vsync', 'cfr',        // Constant frame rate to avoid gaps
-            '-async', '1',          // Audio sync
-            '-copyts',              // Copy timestamps
-            '-start_at_zero',       // Reset timestamps
-            '-max_muxing_queue_size', '1024', // Increase muxing queue
+            '-vsync', 'cfr',
+            '-copyts',
+            '-start_at_zero',
+            '-max_muxing_queue_size', '1024',
             '-y'
           ])
           .output(segmentPath);
 
-        // Add progress logging
         ffmpegCmd
           .on('start', (cmd) => {
             console.log(`🚀 DIRECT-PROCESS: FFmpeg command for segment ${i}:`, cmd);
@@ -127,14 +133,15 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // Create concat file
+    // Create concat file for video segments
     const concatFilePath = path.join(tempDir, `concat_${outputId}.txt`);
     const concatContent = segmentPaths.map(p => `file '${p}'`).join('\n');
     await writeFile(concatFilePath, concatContent, 'utf8');
 
-    console.log('🚀 DIRECT-PROCESS: Concatenating segments...');
+    console.log('🚀 DIRECT-PROCESS: Concatenating video segments...');
 
-    // Concatenate segments with optimized settings
+    // First, concatenate video segments without audio
+    const videoOnlyPath = path.join(tempDir, `video_only_${outputId}.mp4`);
     await new Promise<void>((resolve, reject) => {
       const concatCmd = ffmpeg()
         .input(concatFilePath)
@@ -144,30 +151,74 @@ export async function POST(req: NextRequest) {
           '-protocol_whitelist', 'file,http,https,tcp,tls'
         ])
         .videoCodec('copy')
-        .audioCodec('copy')
+        .noAudio()
         .outputOptions([
-          '-movflags', '+faststart',  // Web optimization
+          '-movflags', '+faststart',
           '-avoid_negative_ts', 'make_zero',
-          '-map_metadata', '0',       // Copy metadata
+          '-y'
+        ])
+        .output(videoOnlyPath);
+
+      concatCmd
+        .on('start', (cmd) => {
+          console.log('🚀 DIRECT-PROCESS: Video concatenation command:', cmd);
+        })
+        .on('progress', (progress) => {
+          if (progress.percent) {
+            console.log(`🚀 DIRECT-PROCESS: Video concatenation - ${progress.percent.toFixed(1)}%`);
+          }
+        })
+        .on('end', () => {
+          console.log('🚀 DIRECT-PROCESS: Video concatenation completed');
+          resolve();
+        })
+        .on('error', (error) => {
+          console.error('🚀 DIRECT-PROCESS: Video concatenation failed:', error);
+          reject(error);
+        })
+        .run();
+    });
+
+    // Convert audio URL to absolute path
+    let audioPath = audioUrl;
+    if (audioPath.startsWith('/uploads/')) {
+      audioPath = path.join(process.cwd(), 'public', audioPath);
+    }
+
+    console.log('🚀 DIRECT-PROCESS: Combining video with audio track...');
+
+    // Finally, combine the concatenated video with the audio track
+    await new Promise<void>((resolve, reject) => {
+      const finalCmd = ffmpeg()
+        .input(videoOnlyPath)
+        .input(audioPath)
+        .outputOptions([
+          '-c:v', 'copy',  // Copy video without re-encoding
+          '-c:a', 'aac',   // Encode audio to AAC
+          '-map', '0:v:0', // Map video from first input
+          '-map', '1:a:0', // Map audio from second input
+          '-shortest',     // End when shortest stream ends
+          '-movflags', '+faststart',
           '-y'
         ])
         .output(outputPath);
 
-      concatCmd
+      finalCmd
         .on('start', (cmd) => {
-          console.log('🚀 DIRECT-PROCESS: Concatenation command:', cmd);
+          console.log('🚀 DIRECT-PROCESS: Final combination command:', cmd);
         })
         .on('progress', (progress) => {
           if (progress.percent) {
-            console.log(`🚀 DIRECT-PROCESS: Concatenation - ${progress.percent.toFixed(1)}%`);
+            console.log(`🚀 DIRECT-PROCESS: Final combination - ${progress.percent.toFixed(1)}%`);
           }
         })
         .on('end', async () => {
-          console.log('🚀 DIRECT-PROCESS: Concatenation completed');
+          console.log('🚀 DIRECT-PROCESS: Final combination completed');
           
           // Clean up temp files
           try {
             await unlink(concatFilePath);
+            await unlink(videoOnlyPath);
             for (const segPath of segmentPaths) {
               await unlink(segPath);
             }
@@ -178,7 +229,7 @@ export async function POST(req: NextRequest) {
           resolve();
         })
         .on('error', (error) => {
-          console.error('🚀 DIRECT-PROCESS: Concatenation failed:', error);
+          console.error('🚀 DIRECT-PROCESS: Final combination failed:', error);
           reject(error);
         })
         .run();
