@@ -39,12 +39,14 @@ export default function EasyEditPage() {
       fftSize: 2048,
       smoothingTimeConstant: 0.8,
       sensitivity: 1.0,
-      algorithm: 'onset',
       onProgress: (progress) => {
         setProgress(progress * 30); // 0-30% for audio analysis
         setProgressMessage(`Analyzing audio... ${Math.round(progress * 100)}%`);
       }
     });
+    
+    // Set the algorithm after initialization
+    analyzerRef.current.setAlgorithm('onset');
 
     return () => {
       analyzerRef.current?.dispose();
