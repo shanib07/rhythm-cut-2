@@ -499,4 +499,93 @@ export function hasEnoughMemory(): boolean {
 
 export async function tryFreeMemory(): Promise<void> {
   // No-op for server-side processing
-} 
+}
+
+/**
+ * Direct video processing (bypasses queue for faster processing)
+ */
+export const processVideoWithBeatsDirect = async (
+  videos: { file: File; id: string }[],
+  beatMarkers: number[],
+  projectName: string = 'Video Processing',
+  onProgress?: ProgressCallback
+): Promise<string> => {
+  console.log('🚀 DIRECT: Starting direct video processing', {
+    videosCount: videos.length,
+    beatMarkersCount: beatMarkers.length,
+    timestamp: new Date().toISOString()
+  });
+
+  try {
+    // Validate inputs
+    if (!videos || videos.length === 0) {
+      throw new Error('No video files provided');
+    }
+
+    if (!beatMarkers || beatMarkers.length < 2) {
+      throw new Error('Need at least 2 beat markers to create video segments');
+    }
+
+    // Upload all video files first
+    console.log('🚀 DIRECT: Uploading videos...');
+    onProgress?.(0.1);
+    const uploadedVideos = [];
+    
+    for (let i = 0; i < videos.length; i++) {
+      const video = videos[i];
+      console.log(`🚀 DIRECT: Uploading video ${i + 1}/${videos.length}`);
+      
+      const serverUrl = await uploadVideoFile(video.file);
+      const metadata = await getVideoMetadata(video.file);
+      
+      uploadedVideos.push({
+        id: video.id,
+        url: serverUrl,
+        duration: metadata.duration
+      });
+      
+      onProgress?.(0.1 + (i + 1) / videos.length * 0.3);
+    }
+
+    console.log('🚀 DIRECT: Starting direct processing...');
+    onProgress?.(0.4);
+
+    // Call direct processing endpoint
+    const response = await fetch('/api/process-direct', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        name: projectName,
+        inputVideos: uploadedVideos,
+        beatMarkers: beatMarkers
+      })
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({ error: 'Processing failed' }));
+      throw new Error(`Direct processing failed: ${errorData.error || errorData.details || response.statusText}`);
+    }
+
+    const { success, outputUrl, processingTime } = await response.json();
+    
+    if (!success) {
+      throw new Error('Direct processing failed');
+    }
+
+    console.log('🚀 DIRECT: Processing completed', {
+      outputUrl,
+      processingTimeMs: processingTime
+    });
+
+    onProgress?.(1.0);
+    return outputUrl;
+
+  } catch (error) {
+    console.error('🚀 DIRECT: Processing failed', {
+      error: error instanceof Error ? error.message : 'Unknown error'
+    });
+    throw error;
+  }
+}; 

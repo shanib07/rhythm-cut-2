@@ -7,7 +7,7 @@ import { generateUniqueId } from '../utils/videoUtils';
 import { VideoClip, BeatMarker, TimelineSegment } from '../types';
 import { toast } from 'sonner';
 import { ProgressBar } from './ProgressBar';
-import { uploadVideoFile, getVideoMetadata, processVideoWithBeats } from '../utils/ffmpeg';
+import { uploadVideoFile, getVideoMetadata, processVideoWithBeats, processVideoWithBeatsDirect } from '../utils/ffmpeg';
 
 export const VideoEditor: React.FC = () => {
   const {
@@ -28,12 +28,14 @@ export const VideoEditor: React.FC = () => {
     setLoading
   } = useVideoStore();
 
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [currentTime, setCurrentTime] = useState(0);
-  const [newBeatTime, setNewBeatTime] = useState('');
   const videoRef = useRef<HTMLVideoElement>(null);
+  const videoRef2 = useRef<HTMLVideoElement>(null); // Second video for seamless transitions
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [newBeatTime, setNewBeatTime] = useState('');
   const [currentVideoIndex, setCurrentVideoIndex] = useState(0);
+  const [activeVideoRef, setActiveVideoRef] = useState<'video1' | 'video2'>('video1');
   const [isTransitioning, setIsTransitioning] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -113,42 +115,98 @@ export const VideoEditor: React.FC = () => {
     };
   }, [audioUrl]);
 
-  // Handle video playback
+  // Handle video playback for both video elements
   useEffect(() => {
-    const video = videoRef.current;
-    if (!video) return;
+    const activeVideo = activeVideoRef === 'video1' ? videoRef.current : videoRef2.current;
+    const inactiveVideo = activeVideoRef === 'video1' ? videoRef2.current : videoRef.current;
+    
+    if (!activeVideo) return;
 
     if (isPlaying) {
-      video.play().catch(console.error);
-      // Mute video to only play the audio track
-      video.muted = true;
+      activeVideo.play().catch(console.error);
+      // Mute videos to only play the audio track
+      activeVideo.muted = true;
     } else {
-      video.pause();
+      activeVideo.pause();
+      if (inactiveVideo) {
+        inactiveVideo.pause();
+      }
     }
-  }, [isPlaying, currentVideoIndex]);
+  }, [isPlaying, activeVideoRef]);
 
-  // Handle audio time update
+  // Handle audio time update with seamless video transitions
   const handleAudioTimeUpdate = () => {
-    if (audioRef.current) {
+    if (audioRef.current && !isTransitioning) {
       const newTime = audioRef.current.currentTime;
       setCurrentTime(newTime);
 
-      // Find and switch to the appropriate video segment based on audio time
-      const currentSegment = videoSegments.find(segment => 
+      // Find current and next segments
+      const currentSegmentIndex = videoSegments.findIndex(segment => 
         segment && newTime >= segment.startTime && newTime < segment.endTime
       );
 
-      if (currentSegment) {
+      if (currentSegmentIndex !== -1) {
+        const currentSegment = videoSegments[currentSegmentIndex];
         const segmentIndex = clips.findIndex(clip => clip.id === currentSegment.clipId);
         
+        // Check if we need to transition to a new video
         if (segmentIndex !== currentVideoIndex) {
-          setCurrentVideoIndex(segmentIndex);
-          setCurrentClip(currentSegment.clipId);
+          setIsTransitioning(true);
           
-          // Set the correct time within the video
-          if (videoRef.current) {
+          // Get the inactive video element
+          const inactiveRef = activeVideoRef === 'video1' ? videoRef2 : videoRef;
+          const activeRef = activeVideoRef === 'video1' ? videoRef : videoRef2;
+          
+          if (inactiveRef.current && clips[segmentIndex]) {
+            // Preload the next video
+            inactiveRef.current.src = clips[segmentIndex].url;
+            inactiveRef.current.currentTime = 0;
+            inactiveRef.current.muted = true;
+            
+            // Wait for the video to be ready
+            inactiveRef.current.oncanplay = () => {
+              // Switch videos
+              setActiveVideoRef(prev => prev === 'video1' ? 'video2' : 'video1');
+              setCurrentVideoIndex(segmentIndex);
+              setCurrentClip(currentSegment.clipId);
+              
+              // Start playing the new video
+              if (isPlaying) {
+                inactiveRef.current?.play().catch(console.error);
+              }
+              
+              // Pause the old video
+              activeRef.current?.pause();
+              
+              setIsTransitioning(false);
+            };
+          }
+        } else {
+          // Update time within current video
+          const activeRef = activeVideoRef === 'video1' ? videoRef : videoRef2;
+          if (activeRef.current) {
             const relativeTime = newTime - currentSegment.startTime;
-            videoRef.current.currentTime = relativeTime;
+            const timeDiff = Math.abs(activeRef.current.currentTime - relativeTime);
+            
+            // Only seek if the time difference is significant (> 0.1 seconds)
+            if (timeDiff > 0.1) {
+              activeRef.current.currentTime = relativeTime;
+            }
+          }
+        }
+        
+        // Preload next segment if we're near the end
+        const timeUntilNextSegment = currentSegment.endTime - newTime;
+        if (timeUntilNextSegment < 0.5 && currentSegmentIndex < videoSegments.length - 1) {
+          const nextSegment = videoSegments[currentSegmentIndex + 1];
+          const nextClip = clips.find(clip => clip.id === nextSegment.clipId);
+          
+          if (nextClip) {
+            const inactiveRef = activeVideoRef === 'video1' ? videoRef2 : videoRef;
+            if (inactiveRef.current && inactiveRef.current.src !== nextClip.url) {
+              inactiveRef.current.src = nextClip.url;
+              inactiveRef.current.load();
+            }
           }
         }
       }
@@ -160,11 +218,17 @@ export const VideoEditor: React.FC = () => {
     setIsPlaying(false);
     setCurrentTime(0);
     setCurrentVideoIndex(0);
+    setActiveVideoRef('video1');
+    
     if (clips[0]) {
       setCurrentClip(clips[0].id);
     }
+    
     if (videoRef.current) {
       videoRef.current.currentTime = 0;
+    }
+    if (videoRef2.current) {
+      videoRef2.current.currentTime = 0;
     }
   };
 
@@ -175,18 +239,24 @@ export const VideoEditor: React.FC = () => {
       return;
     }
 
+    const activeVideo = activeVideoRef === 'video1' ? videoRef.current : videoRef2.current;
+
     if (isPlaying) {
       audioRef.current.pause();
-      if (videoRef.current) {
-        videoRef.current.pause();
+      if (activeVideo) {
+        activeVideo.pause();
       }
     } else {
       // If starting playback, ensure we're at the right position
-      const currentSegment = videoSegments[currentVideoIndex];
-      if (currentSegment && videoRef.current) {
+      const currentSegment = videoSegments.find(seg => 
+        currentTime >= seg.startTime && currentTime < seg.endTime
+      );
+      
+      if (currentSegment && activeVideo) {
         const relativeTime = currentTime - currentSegment.startTime;
-        videoRef.current.currentTime = relativeTime;
+        activeVideo.currentTime = relativeTime;
       }
+      
       audioRef.current.play().catch(error => {
         console.error('Error playing audio:', error);
         toast.error('Error playing audio');
@@ -292,8 +362,8 @@ export const VideoEditor: React.FC = () => {
         message: 'Starting server-side processing...'
       }));
 
-      // Use the server-side processing function with detailed progress tracking
-      const outputUrl = await processVideoWithBeats(
+      // Use direct processing for faster exports (bypasses queue)
+      const outputUrl = await processVideoWithBeatsDirect(
         videosForProcessing,
         beatMarkers,
         `Rhythm Cut Export - ${new Date().toISOString()}`,
@@ -356,17 +426,29 @@ export const VideoEditor: React.FC = () => {
       <div className="grid grid-cols-12 gap-6">
         {/* Left panel - Video upload and preview */}
         <div className="col-span-8 space-y-4">
-          {/* Video preview */}
+          {/* Video preview with dual video elements for seamless transitions */}
           {currentVideoClip ? (
             <div className="relative aspect-video bg-black rounded-lg overflow-hidden">
               <video
                 ref={videoRef}
                 src={currentVideoClip.url}
-                className="w-full h-full"
+                className={`absolute inset-0 w-full h-full transition-opacity duration-200 ${
+                  activeVideoRef === 'video1' ? 'opacity-100' : 'opacity-0'
+                }`}
                 controls={false}
                 muted={true}
-                onTimeUpdate={handleAudioTimeUpdate}
-                onEnded={handleAudioEnded}
+                playsInline
+                preload="auto"
+              />
+              <video
+                ref={videoRef2}
+                className={`absolute inset-0 w-full h-full transition-opacity duration-200 ${
+                  activeVideoRef === 'video2' ? 'opacity-100' : 'opacity-0'
+                }`}
+                controls={false}
+                muted={true}
+                playsInline
+                preload="auto"
               />
               
               {/* Playback controls */}
