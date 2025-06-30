@@ -509,12 +509,14 @@ export const processVideoWithBeatsDirect = async (
   beatMarkers: number[],
   audioFile: File,
   projectName: string = 'Video Processing',
+  quality: 'fast' | 'balanced' | 'high' = 'balanced',
   onProgress?: ProgressCallback
 ): Promise<string> => {
   console.log('🚀 DIRECT: Starting direct video processing', {
     videosCount: videos.length,
     beatMarkersCount: beatMarkers.length,
     audioFileName: audioFile.name,
+    quality,
     timestamp: new Date().toISOString()
   });
 
@@ -571,7 +573,8 @@ export const processVideoWithBeatsDirect = async (
         name: projectName,
         inputVideos: uploadedVideos,
         beatMarkers: beatMarkers,
-        audioUrl: audioUrl
+        audioUrl: audioUrl,
+        quality: quality
       })
     });
 

@@ -47,6 +47,7 @@ export const VideoEditor: React.FC = () => {
     message: '',
     projectId: null as string | null
   });
+  const [exportQuality, setExportQuality] = useState<'fast' | 'balanced' | 'high'>('balanced');
 
   const handleAddBeat = () => {
     const time = parseFloat(newBeatTime);
@@ -377,6 +378,7 @@ export const VideoEditor: React.FC = () => {
         beatMarkers,
         audioFile,
         `Rhythm Cut Export - ${new Date().toISOString()}`,
+        exportQuality,
         (progress) => {
           console.log('🎬 EXPORT: Progress update received', { progress: `${(progress * 100).toFixed(1)}%` });
           setExportProgress(prev => ({
@@ -584,6 +586,26 @@ export const VideoEditor: React.FC = () => {
           {/* Export Section */}
           <div className="bg-gray-50 p-4 rounded-lg">
             <h3 className="text-black font-semibold mb-3" style={{ color: 'black' }}>Export Video</h3>
+            
+            {/* Quality Selector */}
+            <div className="mb-4">
+              <label className="text-sm text-gray-600 block mb-2">Export Quality:</label>
+              <select
+                value={exportQuality}
+                onChange={(e) => setExportQuality(e.target.value as 'fast' | 'balanced' | 'high')}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-black"
+                disabled={isProcessing}
+              >
+                <option value="fast">Fast (Lower Quality)</option>
+                <option value="balanced">Balanced (Recommended)</option>
+                <option value="high">High Quality (Slower)</option>
+              </select>
+              <p className="text-xs text-gray-500 mt-1">
+                {exportQuality === 'fast' && 'Quick export with reduced quality'}
+                {exportQuality === 'balanced' && 'Good balance of speed and quality'}
+                {exportQuality === 'high' && 'Best quality but takes longer'}
+              </p>
+            </div>
             
             {isProcessing ? (
               <div className="space-y-3">

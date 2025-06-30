@@ -72,37 +72,36 @@ export class AudioAnalyzer {
   private lastOnsetTime: number = 0;
   private currentTempo: number = 120;
   private algorithm: 'onset' | 'energy' | 'valley' = 'onset';
+  private onProgress?: (progress: number) => void;
 
   // Configuration constants
-  private readonly FFT_SIZE: number = 2048;
-  private readonly SMOOTHING_TIME_CONSTANT: number = 0.8;
-  private readonly WINDOW_SIZE: number = 40;
+  private readonly FFT_SIZE: number;
+  private readonly SMOOTHING_TIME_CONSTANT: number;
+  private readonly WINDOW_SIZE: number;
   private readonly HISTORY_SIZE: number = 100;
   private readonly SMOOTHING_FACTOR: number = 0.8;
   private readonly FLUX_THRESHOLD: number = 0.1;
-  private readonly THRESHOLD_MULTIPLIER: number = 1.5;
-  private readonly MIN_ONSET_GAP: number = 100;
-  private readonly MIN_TEMPO: number = 60;
-  private readonly MAX_TEMPO: number = 200;
+  private readonly THRESHOLD_MULTIPLIER: number;
+  private readonly MIN_ONSET_GAP: number;
+  private readonly MIN_TEMPO: number;
+  private readonly MAX_TEMPO: number;
 
   constructor(options: AudioAnalyzerOptions = {}) {
-    const {
-      fftSize = 2048,
-      smoothingTimeConstant = 0.8,
-      maxFrequency = 5000,
-      minOnsetGap = 100,
-      thresholdMultiplier = 1.5,
-      windowSize = 40,
-      minTempo = 60,
-      maxTempo = 200,
-      sensitivity = 1.0,
-      chunkSize,
-      onProgress
-    } = options;
-
-    this.sensitivity = sensitivity;
-    this.maxFrequency = maxFrequency;
-    this.initializeContext(fftSize, smoothingTimeConstant);
+    this.FFT_SIZE = options.fftSize || 2048;
+    this.SMOOTHING_TIME_CONSTANT = options.smoothingTimeConstant || 0.8;
+    this.WINDOW_SIZE = options.windowSize || 40;
+    this.THRESHOLD_MULTIPLIER = options.thresholdMultiplier || 1.5;
+    this.MIN_ONSET_GAP = options.minOnsetGap || 100;
+    this.MIN_TEMPO = options.minTempo || 60;
+    this.MAX_TEMPO = options.maxTempo || 200;
+    this.maxFrequency = options.maxFrequency || 5000;
+    this.sensitivity = options.sensitivity || 1.0;
+    this.onProgress = options.onProgress;
+    
+    // Initialize only if we have Web Audio API support
+    if (typeof window !== 'undefined' && (window.AudioContext || window.webkitAudioContext)) {
+      this.initializeContext(this.FFT_SIZE, this.SMOOTHING_TIME_CONSTANT);
+    }
   }
 
   private initializeContext(fftSize: number, smoothingTimeConstant: number): void {
@@ -782,19 +781,25 @@ export class AudioAnalyzer {
     confidence: number;
     beats: Array<{ timestamp: number; confidence: number; tempo: number }>;
   }> {
+    // Add a yield function to prevent UI blocking
+    const yieldToMain = (): Promise<void> => new Promise(resolve => setTimeout(resolve, 0));
+    
     switch (this.algorithm) {
       case 'onset':
-        return this.analyzeWithOnsetDetection(audioBuffer);
+        return this.analyzeWithOnsetDetection(audioBuffer, yieldToMain);
       case 'energy':
-        return this.analyzeWithEnergyPeaks(audioBuffer);
+        return this.analyzeWithEnergyPeaks(audioBuffer, yieldToMain);
       case 'valley':
-        return this.analyzeWithValleyToPeak(audioBuffer);
+        return this.analyzeWithValleyToPeak(audioBuffer, yieldToMain);
       default:
-        return this.analyzeWithOnsetDetection(audioBuffer);
+        return this.analyzeWithOnsetDetection(audioBuffer, yieldToMain);
     }
   }
 
-  private async analyzeWithOnsetDetection(audioBuffer: AudioBuffer): Promise<{
+  private async analyzeWithOnsetDetection(
+    audioBuffer: AudioBuffer,
+    yieldToMain?: () => Promise<void>
+  ): Promise<{
     beatCount: number;
     averageTempo: number;
     confidence: number;
@@ -828,8 +833,20 @@ export class AudioAnalyzer {
     const spectralCentroid: number[] = [];
     let previousMagnitudes: number[] = new Array(frameSize / 2).fill(0);
     
-    // Process each frame
+    // Process each frame with periodic yielding
+    const FRAMES_PER_YIELD = 100; // Yield every 100 frames
+    
     for (let frame = 0; frame < numFrames; frame++) {
+      // Yield control to prevent UI blocking
+      if (yieldToMain && frame % FRAMES_PER_YIELD === 0) {
+        await yieldToMain();
+        
+        // Report progress
+        if (this.onProgress) {
+          this.onProgress(frame / numFrames * 0.5); // First 50% for analysis
+        }
+      }
+      
       const startSample = frame * hopSize;
       
       // Extract frame and apply window
@@ -982,7 +999,10 @@ export class AudioAnalyzer {
     };
   }
 
-  private async analyzeWithEnergyPeaks(audioBuffer: AudioBuffer): Promise<{
+  private async analyzeWithEnergyPeaks(
+    audioBuffer: AudioBuffer,
+    yieldToMain?: () => Promise<void>
+  ): Promise<{
     beatCount: number;
     averageTempo: number;
     confidence: number;
@@ -990,54 +1010,47 @@ export class AudioAnalyzer {
   }> {
     console.log('[AudioAnalyzer] Starting energy-based peak detection...');
     
-    const offlineContext = new OfflineAudioContext(
-      audioBuffer.numberOfChannels,
-      audioBuffer.length,
-      audioBuffer.sampleRate
-    );
-
-    // Apply low-pass filter for bass frequencies
-    const source = offlineContext.createBufferSource();
-    source.buffer = audioBuffer;
-    
-    const lowPassFilter = offlineContext.createBiquadFilter();
-    lowPassFilter.type = 'lowpass';
-    lowPassFilter.frequency.value = 200; // Focus on bass
-    lowPassFilter.Q.value = 1;
-
-    source.connect(lowPassFilter);
-    lowPassFilter.connect(offlineContext.destination);
-    source.start(0);
-    
-    const renderedBuffer = await offlineContext.startRendering();
-    const channelData = renderedBuffer.getChannelData(0);
-    const sampleRate = renderedBuffer.sampleRate;
-    
-    // Calculate energy in windows
-    const windowSize = Math.floor(sampleRate * 0.02); // 20ms windows
+    const channelData = audioBuffer.getChannelData(0);
+    const sampleRate = audioBuffer.sampleRate;
+    const windowSize = Math.floor(sampleRate * 0.01); // 10ms windows
     const hopSize = Math.floor(windowSize / 2);
-    const energy: number[] = [];
     
-    for (let i = 0; i < channelData.length - windowSize; i += hopSize) {
-      let sum = 0;
-      for (let j = 0; j < windowSize; j++) {
-        const sample = channelData[i + j];
-        sum += sample * sample;
+    // Calculate energy for each window
+    const energyValues: number[] = [];
+    const windows = Math.floor((channelData.length - windowSize) / hopSize);
+    const WINDOWS_PER_YIELD = 1000; // Yield every 1000 windows
+    
+    for (let i = 0; i < windows; i++) {
+      // Yield control periodically
+      if (yieldToMain && i % WINDOWS_PER_YIELD === 0) {
+        await yieldToMain();
+        if (this.onProgress) {
+          this.onProgress(i / windows * 0.3); // First 30% for energy calculation
+        }
       }
-      energy.push(Math.sqrt(sum / windowSize));
+      
+      const startIdx = i * hopSize;
+      let energy = 0;
+      
+      for (let j = 0; j < windowSize; j++) {
+        const sample = channelData[startIdx + j] || 0;
+        energy += sample * sample;
+      }
+      
+      energyValues.push(Math.sqrt(energy / windowSize));
     }
     
     // Find peaks using dynamic threshold
     const beats: Array<{ timestamp: number; confidence: number; tempo: number }> = [];
     const windowLength = Math.floor(1.5 * sampleRate / hopSize); // 1.5 second window
     
-    for (let i = 1; i < energy.length - 1; i++) {
+    for (let i = 1; i < energyValues.length - 1; i++) {
       // Check if this is a local peak
-      if (energy[i] > energy[i - 1] && energy[i] > energy[i + 1]) {
+      if (energyValues[i] > energyValues[i - 1] && energyValues[i] > energyValues[i + 1]) {
         // Calculate local statistics
         const windowStart = Math.max(0, i - windowLength);
-        const windowEnd = Math.min(energy.length, i + windowLength);
-        const localEnergy = energy.slice(windowStart, windowEnd);
+        const windowEnd = Math.min(energyValues.length, i + windowLength);
+        const localEnergy = energyValues.slice(windowStart, windowEnd);
         
         const mean = localEnergy.reduce((a, b) => a + b, 0) / localEnergy.length;
         const variance = localEnergy.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / localEnergy.length;
@@ -1047,13 +1060,13 @@ export class AudioAnalyzer {
         const thresholdMultiplier = 3.5 - (this.sensitivity * 1.5); // 2.0 to 0.5
         const threshold = mean + (stdDev * thresholdMultiplier);
         
-        if (energy[i] > threshold) {
+        if (energyValues[i] > threshold) {
           const timestamp = (i * hopSize) / sampleRate;
           const lastBeat = beats[beats.length - 1];
           
           // Minimum 250ms between beats
           if (!lastBeat || (timestamp - lastBeat.timestamp) >= 0.25) {
-            const prominence = (energy[i] - mean) / stdDev;
+            const prominence = (energyValues[i] - mean) / stdDev;
             const confidence = Math.min(1, prominence / 4);
             
             beats.push({
@@ -1093,55 +1106,57 @@ export class AudioAnalyzer {
     };
   }
 
-  private async analyzeWithValleyToPeak(audioBuffer: AudioBuffer): Promise<{
+  private async analyzeWithValleyToPeak(
+    audioBuffer: AudioBuffer,
+    yieldToMain?: () => Promise<void>
+  ): Promise<{
     beatCount: number;
     averageTempo: number;
     confidence: number;
     beats: Array<{ timestamp: number; confidence: number; tempo: number }>;
   }> {
-    console.log('[AudioAnalyzer] Starting valley-to-peak beat analysis...');
+    console.log('[AudioAnalyzer] Starting valley-to-peak detection...');
     
-    const offlineContext = new OfflineAudioContext(
-      audioBuffer.numberOfChannels,
-      audioBuffer.length,
-      audioBuffer.sampleRate
-    );
-
-    const source = offlineContext.createBufferSource();
-    source.buffer = audioBuffer;
-
-    // Create filters for low and mid frequencies (20-1000 Hz)
-    const lowPassFilter = offlineContext.createBiquadFilter();
-    lowPassFilter.type = 'lowpass';
-    lowPassFilter.frequency.value = 1000;
-    lowPassFilter.Q.value = 1;
-
-    const highPassFilter = offlineContext.createBiquadFilter();
-    highPassFilter.type = 'highpass';
-    highPassFilter.frequency.value = 20;
-    highPassFilter.Q.value = 1;
-
-    // Connect the audio graph
-    source.connect(highPassFilter);
-    highPassFilter.connect(lowPassFilter);
-    lowPassFilter.connect(offlineContext.destination);
-
-    source.start(0);
-    const renderedBuffer = await offlineContext.startRendering();
+    const channelData = audioBuffer.getChannelData(0);
+    const sampleRate = audioBuffer.sampleRate;
     
-    // Get the filtered audio data
-    const channelData = renderedBuffer.getChannelData(0);
-    const sampleRate = renderedBuffer.sampleRate;
+    // Parameters
+    const windowSize = Math.floor(sampleRate * 0.023); // ~23ms windows
+    const hopSize = Math.floor(windowSize / 2);
+    const smoothingWindowSize = 3;
+    
+    // Calculate RMS energy
+    const rmsValues: number[] = [];
+    const windows = Math.floor((channelData.length - windowSize) / hopSize);
+    const WINDOWS_PER_YIELD = 1000;
+    
+    for (let i = 0; i < windows; i++) {
+      // Yield control periodically
+      if (yieldToMain && i % WINDOWS_PER_YIELD === 0) {
+        await yieldToMain();
+        if (this.onProgress) {
+          this.onProgress(i / windows * 0.3); // First 30% for RMS calculation
+        }
+      }
+      
+      const startIdx = i * hopSize;
+      let sum = 0;
+      
+      for (let j = 0; j < windowSize; j++) {
+        const sample = channelData[startIdx + j] || 0;
+        sum += sample * sample;
+      }
+      
+      rmsValues.push(Math.sqrt(sum / windowSize));
+    }
     
     // Calculate amplitude envelope with a sliding window
-    const windowSize = Math.floor(sampleRate * 0.01); // 10ms window
     const envelope: number[] = [];
-    
-    for (let i = 0; i < channelData.length; i += windowSize) {
+    for (let i = 0; i < rmsValues.length; i++) {
       let sum = 0;
       let count = 0;
-      for (let j = i; j < Math.min(i + windowSize, channelData.length); j++) {
-        sum += Math.abs(channelData[j]);
+      for (let j = i; j < Math.min(i + smoothingWindowSize, rmsValues.length); j++) {
+        sum += rmsValues[j];
         count++;
       }
       envelope.push(sum / count);

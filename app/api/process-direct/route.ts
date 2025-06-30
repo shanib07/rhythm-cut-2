@@ -18,7 +18,13 @@ export async function POST(req: NextRequest) {
 
   try {
     const body = await req.json();
-    const { name, inputVideos, beatMarkers, audioUrl } = body;
+    const { name, inputVideos, beatMarkers, audioUrl, quality = 'balanced' }: {
+      name: string;
+      inputVideos: VideoInput[];
+      beatMarkers: number[];
+      audioUrl: string;
+      quality?: 'fast' | 'balanced' | 'high';
+    } = body;
 
     // Validate input
     if (!inputVideos || !beatMarkers || inputVideos.length === 0 || beatMarkers.length < 2) {
@@ -38,8 +44,18 @@ export async function POST(req: NextRequest) {
     console.log('🚀 DIRECT-PROCESS: Processing request', {
       videosCount: inputVideos.length,
       beatMarkersCount: beatMarkers.length,
-      hasAudio: !!audioUrl
+      hasAudio: !!audioUrl,
+      quality
     });
+
+    // Quality settings
+    const qualitySettings = {
+      fast: { crf: '28', preset: 'ultrafast', tune: 'fastdecode' },
+      balanced: { crf: '23', preset: 'fast', tune: 'film' },
+      high: { crf: '18', preset: 'medium', tune: 'film' }
+    };
+
+    const settings = qualitySettings[quality] || qualitySettings.balanced;
 
     // Create output directory
     const outputDir = path.join(process.cwd(), 'public', 'exports');
@@ -70,67 +86,83 @@ export async function POST(req: NextRequest) {
     const tempDir = path.join(process.cwd(), 'tmp');
     await mkdir(tempDir, { recursive: true });
 
-    // Process each segment
+    // Process segments in parallel batches for better performance
+    const BATCH_SIZE = 3; // Process 3 segments at a time
+    const segmentPromises: Array<() => Promise<string>> = [];
+
+    // Create promises for each segment
     for (let i = 0; i < segments.length; i++) {
       const segment = segments[i];
       const segmentPath = path.join(tempDir, `segment_${i}_${outputId}.mp4`);
       segmentPaths.push(segmentPath);
 
-      // Convert URL to absolute path
-      let videoPath = segment.video.url;
-      if (videoPath.startsWith('/uploads/')) {
-        videoPath = path.join(process.cwd(), 'public', segment.video.url);
-      }
+      segmentPromises.push(async () => {
+        // Convert URL to absolute path
+        let videoPath = segment.video.url;
+        if (videoPath.startsWith('/uploads/')) {
+          videoPath = path.join(process.cwd(), 'public', segment.video.url);
+        }
 
-      console.log(`🚀 DIRECT-PROCESS: Processing segment ${i}/${segments.length}`);
+        console.log(`🚀 DIRECT-PROCESS: Processing segment ${i}/${segments.length}`);
 
-      await new Promise<void>((resolve, reject) => {
-        // Process video segments without audio to avoid conflicts
-        const ffmpegCmd = ffmpeg(videoPath)
-          .seekInput(segment.startTime)
-          .inputOptions([
-            '-accurate_seek',
-            '-noaccurate_seek'
-          ])
-          .duration(segment.duration)
-          .videoCodec('libx264')
-          .noAudio() // Remove audio from video segments
-          .size('1280x720')
-          .outputOptions([
-            '-crf', '28',
-            '-preset', 'ultrafast',
-            '-tune', 'fastdecode',
-            '-threads', '0',
-            '-movflags', '+faststart',
-            '-avoid_negative_ts', 'make_zero',
-            '-fflags', '+genpts',
-            '-vsync', 'cfr',
-            '-copyts',
-            '-start_at_zero',
-            '-max_muxing_queue_size', '1024',
-            '-y'
-          ])
-          .output(segmentPath);
+        await new Promise<void>((resolve, reject) => {
+          // Process video segments without audio to avoid conflicts
+          const ffmpegCmd = ffmpeg(videoPath)
+            .seekInput(segment.startTime)
+            .inputOptions([
+              '-accurate_seek',
+              '-noaccurate_seek'
+            ])
+            .duration(segment.duration)
+            .videoCodec('libx264')
+            .noAudio() // Remove audio from video segments
+            .size('1280x720')
+            .outputOptions([
+              '-crf', settings.crf,
+              '-preset', settings.preset,
+              '-tune', settings.tune,
+              '-threads', '0',
+              '-movflags', '+faststart',
+              '-avoid_negative_ts', 'make_zero',
+              '-fflags', '+genpts',
+              '-vsync', 'cfr',
+              '-copyts',
+              '-start_at_zero',
+              '-max_muxing_queue_size', '1024',
+              '-y'
+            ])
+            .output(segmentPath);
 
-        ffmpegCmd
-          .on('start', (cmd) => {
-            console.log(`🚀 DIRECT-PROCESS: FFmpeg command for segment ${i}:`, cmd);
-          })
-          .on('progress', (progress) => {
-            if (progress.percent) {
-              console.log(`🚀 DIRECT-PROCESS: Segment ${i} - ${progress.percent.toFixed(1)}%`);
-            }
-          })
-          .on('end', () => {
-            console.log(`🚀 DIRECT-PROCESS: Segment ${i} completed`);
-            resolve();
-          })
-          .on('error', (error) => {
-            console.error(`🚀 DIRECT-PROCESS: Segment ${i} failed:`, error);
-            reject(error);
-          })
-          .run();
+          ffmpegCmd
+            .on('start', (cmd) => {
+              console.log(`🚀 DIRECT-PROCESS: FFmpeg command for segment ${i}:`, cmd);
+            })
+            .on('progress', (progress) => {
+              if (progress.percent) {
+                console.log(`🚀 DIRECT-PROCESS: Segment ${i} - ${progress.percent.toFixed(1)}%`);
+              }
+            })
+            .on('end', () => {
+              console.log(`🚀 DIRECT-PROCESS: Segment ${i} completed`);
+              resolve();
+            })
+            .on('error', (error) => {
+              console.error(`🚀 DIRECT-PROCESS: Segment ${i} failed:`, error);
+              reject(error);
+            })
+            .run();
+        });
+
+        return segmentPath;
       });
+    }
+
+    // Process segments in batches
+    console.log(`🚀 DIRECT-PROCESS: Processing ${segments.length} segments in batches of ${BATCH_SIZE}`);
+    for (let i = 0; i < segmentPromises.length; i += BATCH_SIZE) {
+      const batch = segmentPromises.slice(i, i + BATCH_SIZE);
+      await Promise.all(batch.map(fn => fn()));
+      console.log(`🚀 DIRECT-PROCESS: Batch ${Math.floor(i / BATCH_SIZE) + 1} completed`);
     }
 
     // Create concat file for video segments
@@ -195,6 +227,7 @@ export async function POST(req: NextRequest) {
         .outputOptions([
           '-c:v', 'copy',  // Copy video without re-encoding
           '-c:a', 'aac',   // Encode audio to AAC
+          '-b:a', '192k',  // Higher audio bitrate for better quality
           '-map', '0:v:0', // Map video from first input
           '-map', '1:a:0', // Map audio from second input
           '-shortest',     // End when shortest stream ends

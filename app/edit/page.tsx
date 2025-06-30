@@ -33,6 +33,7 @@ export default function EditPage() {
   const [volume, setVolume] = useState<number>(1);
   const [sensitivity, setSensitivity] = useState<number>(1.0);
   const [isAnalyzing, setIsAnalyzing] = useState<boolean>(false);
+  const [analysisProgress, setAnalysisProgress] = useState<number>(0);
   const [analysisResults, setAnalysisResults] = useState<AnalysisResults | null>(null);
   const [algorithm, setAlgorithm] = useState<'onset' | 'energy' | 'valley'>('onset');
   const [showAudioSection, setShowAudioSection] = useState<boolean>(true);
@@ -150,13 +151,15 @@ export default function EditPage() {
 
     try {
       setIsAnalyzing(true);
+      setAnalysisProgress(0);
       
       // Ensure analyzer is initialized with latest methods
       if (!analyzerRef.current) {
         analyzerRef.current = new AudioAnalyzer({
           fftSize: 2048,
           smoothingTimeConstant: 0.8,
-          sensitivity: sensitivity
+          sensitivity: sensitivity,
+          onProgress: (progress) => setAnalysisProgress(progress)
         });
       }
       
@@ -168,7 +171,8 @@ export default function EditPage() {
         analyzerRef.current = new AudioAnalyzer({
           fftSize: 2048,
           smoothingTimeConstant: 0.8,
-          sensitivity: sensitivity
+          sensitivity: sensitivity,
+          onProgress: (progress) => setAnalysisProgress(progress)
         });
         analyzerRef.current.setAlgorithm(algorithm);
       }
@@ -194,6 +198,7 @@ export default function EditPage() {
       console.error('Analysis error:', err);
     } finally {
       setIsAnalyzing(false);
+      setAnalysisProgress(0);
     }
   };
 
@@ -355,9 +360,28 @@ export default function EditPage() {
                     disabled={isAnalyzing}
                     className="flex items-center gap-2 px-4 py-2 bg-[#06B6D4] text-white rounded-md hover:bg-[#0891B2] transition-colors disabled:opacity-50 disabled:hover:bg-[#06B6D4]"
                   >
-                    <Activity className="w-5 h-5" />
-                    {isAnalyzing ? 'Analyzing...' : 'Analyze Beats'}
+                    {isAnalyzing ? (
+                      <>
+                        <Loader2 className="w-5 h-5 animate-spin" />
+                        Analyzing... {Math.round(analysisProgress * 100)}%
+                      </>
+                    ) : (
+                      <>
+                        <Activity className="w-5 h-5" />
+                        Analyze Beats
+                      </>
+                    )}
                   </button>
+
+                  {/* Progress Bar */}
+                  {isAnalyzing && (
+                    <div className="w-full h-2 bg-[#334155] rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-[#06B6D4] transition-all duration-300"
+                        style={{ width: `${analysisProgress * 100}%` }}
+                      />
+                    </div>
+                  )}
                 </>
               )}
             </div>
