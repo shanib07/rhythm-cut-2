@@ -579,14 +579,14 @@ export const VideoEditor: React.FC = () => {
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg text-black"
                 disabled={isProcessing}
               >
-                <option value="fast">Ultra Fast (No Re-encode, ~10x faster)</option>
-                <option value="balanced">Smart Mode (Optimized, Recommended)</option>
-                <option value="high">Maximum Quality (Full HD, Slower)</option>
+                <option value="fast">Fast (720p, Quick Processing)</option>
+                <option value="balanced">Balanced (720p, Recommended)</option>
+                <option value="high">High Quality (1080p, Best Output)</option>
               </select>
               <p className="text-xs text-gray-500 mt-1">
-                {exportQuality === 'fast' && '⚡ Copies video data directly - Extremely fast but may have minor timing variations'}
-                {exportQuality === 'balanced' && '✨ Smart encoding at cut points only - Great balance of speed and precision'}
-                {exportQuality === 'high' && '🎬 Full quality processing at 1080p - Best for final production'}
+                {exportQuality === 'fast' && '⚡ Faster processing with good quality'}
+                {exportQuality === 'balanced' && '✨ Best balance of speed and quality'}
+                {exportQuality === 'high' && '🎬 Maximum quality for professional output'}
               </p>
             </div>
             
