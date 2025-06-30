@@ -596,14 +596,14 @@ export const VideoEditor: React.FC = () => {
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg text-black"
                 disabled={isProcessing}
               >
-                <option value="fast">Fast (Lower Quality)</option>
-                <option value="balanced">Balanced (Recommended)</option>
-                <option value="high">High Quality (Slower)</option>
+                <option value="fast">Fast (540p, Lower Quality)</option>
+                <option value="balanced">Balanced (720p, Recommended)</option>
+                <option value="high">High Quality (1080p, Slower)</option>
               </select>
               <p className="text-xs text-gray-500 mt-1">
-                {exportQuality === 'fast' && 'Quick export with reduced quality'}
-                {exportQuality === 'balanced' && 'Good balance of speed and quality'}
-                {exportQuality === 'high' && 'Best quality but takes longer'}
+                {exportQuality === 'fast' && 'Quick export at 540p resolution'}
+                {exportQuality === 'balanced' && 'Good speed and quality at 720p'}
+                {exportQuality === 'high' && 'Best quality at 1080p but takes longer'}
               </p>
             </div>
             

@@ -50,9 +50,9 @@ export async function POST(req: NextRequest) {
 
     // Quality settings
     const qualitySettings = {
-      fast: { crf: '28', preset: 'ultrafast', tune: 'fastdecode' },
-      balanced: { crf: '23', preset: 'fast', tune: 'film' },
-      high: { crf: '18', preset: 'medium', tune: 'film' }
+      fast: { crf: '30', preset: 'veryfast', tune: 'fastdecode', resolution: '960x540' },      // Very fast, lower quality, smaller resolution
+      balanced: { crf: '28', preset: 'ultrafast', tune: 'fastdecode', resolution: '1280x720' }, // Fast with acceptable quality (like before)
+      high: { crf: '23', preset: 'fast', tune: 'film', resolution: '1920x1080' }               // Higher quality, slower, full HD
     };
 
     const settings = qualitySettings[quality] || qualitySettings.balanced;
@@ -87,7 +87,7 @@ export async function POST(req: NextRequest) {
     await mkdir(tempDir, { recursive: true });
 
     // Process segments in parallel batches for better performance
-    const BATCH_SIZE = 3; // Process 3 segments at a time
+    const BATCH_SIZE = segments.length <= 5 ? segments.length : 3; // Process all at once if 5 or fewer
     const segmentPromises: Array<() => Promise<string>> = [];
 
     // Create promises for each segment
@@ -116,7 +116,7 @@ export async function POST(req: NextRequest) {
             .duration(segment.duration)
             .videoCodec('libx264')
             .noAudio() // Remove audio from video segments
-            .size('1280x720')
+            .size(settings.resolution)
             .outputOptions([
               '-crf', settings.crf,
               '-preset', settings.preset,
