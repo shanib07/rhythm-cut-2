@@ -28,9 +28,11 @@ export default function EasyEditPage() {
   const [progressMessage, setProgressMessage] = useState('');
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
   const [beatMarkers, setBeatMarkers] = useState<number[]>([]);
+  const [showAudioOptions, setShowAudioOptions] = useState(false);
   
   const analyzerRef = useRef<AudioAnalyzer | null>(null);
   const audioInputRef = useRef<HTMLInputElement>(null);
+  const videoForAudioInputRef = useRef<HTMLInputElement>(null);
   const videoInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -53,19 +55,28 @@ export default function EasyEditPage() {
     };
   }, []);
 
-  const handleAudioFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
+  const processAudioFromSource = async (file: File, isVideo: boolean = false) => {
     try {
-      // Validate file format and size
-      const validation = await AudioAnalyzer.validateAudioFile(file);
-      if (!validation.valid) {
-        toast.error(validation.error || 'Invalid audio file');
-        return;
+      const fileName = file.name;
+      let audioFileToProcess = file;
+      
+      // If it's a video file, we'll treat it as audio for now
+      // In production, you'd want to extract audio server-side
+      if (isVideo) {
+        toast.info(`Extracting audio from ${fileName}...`);
+        // For now, we'll use the video file directly as browsers can handle audio from video
+        audioFileToProcess = file;
+      } else {
+        // Validate audio file
+        const validation = await AudioAnalyzer.validateAudioFile(file);
+        if (!validation.valid) {
+          toast.error(validation.error || 'Invalid audio file');
+          return;
+        }
       }
 
-      setAudioFile(file);
+      setAudioFile(audioFileToProcess);
+      setShowAudioOptions(false);
 
       // Load and decode audio
       const url = URL.createObjectURL(file);
@@ -76,7 +87,7 @@ export default function EasyEditPage() {
       setAudioBuffer(buffer);
       
       URL.revokeObjectURL(url);
-      toast.success('Audio file loaded successfully');
+      toast.success(isVideo ? 'Audio extracted successfully' : 'Audio file loaded successfully');
       
       // Automatically move to video step
       setCurrentStep('video');
@@ -84,6 +95,18 @@ export default function EasyEditPage() {
       console.error('Error loading audio file:', err);
       toast.error('Error loading audio file. Please try a different file.');
     }
+  };
+
+  const handleAudioFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    await processAudioFromSource(file, false);
+  };
+
+  const handleVideoToAudioFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    await processAudioFromSource(file, true);
   };
 
   const handleVideoFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -219,6 +242,7 @@ export default function EasyEditPage() {
     setProgressMessage('');
     setDownloadUrl(null);
     setBeatMarkers([]);
+    setShowAudioOptions(false);
     
     // Reset file inputs
     if (audioInputRef.current) audioInputRef.current.value = '';
@@ -309,30 +333,89 @@ export default function EasyEditPage() {
                 Step 1: Upload Your Audio
               </h2>
               
-              <label
-                htmlFor="audioUpload"
-                className="block w-full p-10 border-2 border-dashed border-[#475569] rounded-lg 
-                         hover:border-[#06B6D4] transition-colors cursor-pointer text-center
-                         hover:bg-[#06B6D4]/5"
-              >
-                <input
-                  ref={audioInputRef}
-                  type="file"
-                  id="audioUpload"
-                  accept="audio/*"
-                  onChange={handleAudioFileChange}
-                  className="hidden"
-                />
-                <Music className="w-16 h-16 mx-auto mb-4 text-[#06B6D4]" />
-                <p className="text-white text-lg mb-2">
-                  Drop your audio file here or click to browse
-                </p>
-                <p className="text-gray-400 text-sm">
-                  Supports MP3, WAV, M4A, and other audio formats
-                </p>
-              </label>
+              {!showAudioOptions ? (
+                <div
+                  onClick={() => setShowAudioOptions(true)}
+                  className="block w-full p-10 border-2 border-dashed border-[#475569] rounded-lg 
+                           hover:border-[#06B6D4] transition-colors cursor-pointer text-center
+                           hover:bg-[#06B6D4]/5"
+                >
+                  <Music className="w-16 h-16 mx-auto mb-4 text-[#06B6D4]" />
+                  <p className="text-white text-lg mb-2">
+                    Click to select audio source
+                  </p>
+                  <p className="text-gray-400 text-sm">
+                    Import audio file or extract from video
+                  </p>
+                </div>
+              ) : (
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.95 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  className="space-y-4"
+                >
+                  {/* Import Audio File Option */}
+                  <label
+                    htmlFor="audioUpload"
+                    className="block p-6 border-2 border-[#475569] rounded-lg 
+                             hover:border-[#06B6D4] transition-colors cursor-pointer
+                             hover:bg-[#06B6D4]/5"
+                  >
+                    <input
+                      ref={audioInputRef}
+                      type="file"
+                      id="audioUpload"
+                      accept="audio/*,.mp3,.wav,.m4a,.aac,.ogg,.weba,.webm"
+                      onChange={handleAudioFileChange}
+                      className="hidden"
+                    />
+                    <div className="flex items-center gap-4">
+                      <div className="w-14 h-14 bg-[#06B6D4]/20 rounded-full flex items-center justify-center">
+                        <Music className="w-8 h-8 text-[#06B6D4]" />
+                      </div>
+                      <div>
+                        <p className="text-white text-lg font-medium">Import Audio File</p>
+                        <p className="text-gray-400 text-sm">MP3, WAV, M4A, AAC, OGG</p>
+                      </div>
+                    </div>
+                  </label>
 
-              {audioFile && (
+                  {/* Extract Audio from Video Option */}
+                  <label
+                    htmlFor="videoToAudioUpload"
+                    className="block p-6 border-2 border-[#475569] rounded-lg 
+                             hover:border-[#06B6D4] transition-colors cursor-pointer
+                             hover:bg-[#06B6D4]/5"
+                  >
+                    <input
+                      ref={videoForAudioInputRef}
+                      type="file"
+                      id="videoToAudioUpload"
+                      accept="video/*,.mp4,.mov,.avi,.mkv,.webm"
+                      onChange={handleVideoToAudioFileChange}
+                      className="hidden"
+                    />
+                    <div className="flex items-center gap-4">
+                      <div className="w-14 h-14 bg-[#0891B2]/20 rounded-full flex items-center justify-center">
+                        <Video className="w-8 h-8 text-[#0891B2]" />
+                      </div>
+                      <div>
+                        <p className="text-white text-lg font-medium">Extract Audio from Video</p>
+                        <p className="text-gray-400 text-sm">MP4, MOV, AVI, MKV, WebM</p>
+                      </div>
+                    </div>
+                  </label>
+
+                  <button
+                    onClick={() => setShowAudioOptions(false)}
+                    className="w-full text-sm text-gray-400 hover:text-white transition-colors mt-2"
+                  >
+                    Cancel
+                  </button>
+                </motion.div>
+              )}
+
+              {audioFile && !showAudioOptions && (
                 <div className="mt-4 p-4 bg-[#0F172A] rounded-lg">
                   <p className="text-green-400 flex items-center gap-2">
                     <CheckCircle className="w-5 h-5" />

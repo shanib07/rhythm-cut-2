@@ -2,7 +2,7 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Upload, Loader2, Play, Pause, Download, Edit2, Plus, FileAudio, Settings, Sparkles, Film, ChevronLeft, ChevronRight, Check, Info } from 'lucide-react';
+import { Upload, Loader2, Play, Pause, Download, Edit2, Plus, FileAudio, Settings, Sparkles, Film, ChevronLeft, ChevronRight, Check, Info, Music, Video } from 'lucide-react';
 import { AudioAnalyzer } from '@/src/services/AudioAnalyzer';
 import { toast } from 'sonner';
 import { useVideoStore } from '@/src/stores/videoStore';
@@ -42,12 +42,14 @@ export default function EditPage() {
   const [editingBeatIndex, setEditingBeatIndex] = useState<number | null>(null);
   const [videoDurations, setVideoDurations] = useState<Record<string, number>>({});
   const [currentPreviewBeat, setCurrentPreviewBeat] = useState<number>(0);
+  const [showAudioOptions, setShowAudioOptions] = useState(false);
 
   // Refs
   const audioFileRef = useRef<File | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const analyzerRef = useRef<AudioAnalyzer | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const videoForAudioInputRef = useRef<HTMLInputElement>(null);
   const videoFileInputRef = useRef<HTMLInputElement>(null);
   const previewVideoRef = useRef<HTMLVideoElement>(null);
   const timelineRef = useRef<HTMLDivElement>(null);
@@ -130,19 +132,29 @@ export default function EditPage() {
     }
   };
 
-  // Audio Upload Handler
-  const handleAudioUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
+  // Process audio from source
+  const processAudioFromSource = async (file: File, isVideo: boolean = false) => {
     try {
       setIsAnalyzing(true);
-      audioFileRef.current = file;
+      setShowAudioOptions(false);
+      
+      const fileName = file.name;
+      let audioFileToProcess = file;
+      
+      // If it's a video file, we'll treat it as audio for now
+      // In production, you'd want to extract audio server-side
+      if (isVideo) {
+        toast.info(`Extracting audio from ${fileName}...`);
+        // For now, we'll use the video file directly as browsers can handle audio from video
+        audioFileToProcess = file;
+      }
+      
+      audioFileRef.current = audioFileToProcess;
       
       // Create audio URL
       const url = URL.createObjectURL(file);
       setAudioUrl(url);
-      setAudioFile(file);
+      setAudioFile(audioFileToProcess);
 
       // Create audio element
       if (audioRef.current) {
@@ -181,10 +193,24 @@ export default function EditPage() {
       }
     } catch (error) {
       console.error('Error analyzing audio:', error);
-      toast.error('Failed to analyze audio file');
+      toast.error('Failed to analyze audio');
     } finally {
       setIsAnalyzing(false);
     }
+  };
+
+  // Audio Upload Handler
+  const handleAudioUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    await processAudioFromSource(file, false);
+  };
+
+  // Video to Audio Upload Handler
+  const handleVideoToAudioUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    await processAudioFromSource(file, true);
   };
 
   // Video Upload Handler
@@ -385,7 +411,7 @@ export default function EditPage() {
       toast.error('Please add all video clips before preview');
       return;
     }
-
+    
     if (isPlaying) {
       audioRef.current.pause();
       previewVideoRef.current?.pause();
@@ -427,18 +453,16 @@ export default function EditPage() {
             className="flex items-center justify-center min-h-screen p-8"
           >
             <div className="max-w-md w-full">
-              {!isAnalyzing ? (
+              {!isAnalyzing && !showAudioOptions ? (
                 <motion.div
                   className="relative group cursor-pointer"
                   whileHover={{ scale: 1.02 }}
                   whileTap={{ scale: 0.98 }}
+                  onClick={() => setShowAudioOptions(true)}
                 >
                   <div className="absolute inset-0 bg-gradient-to-r from-purple-500 to-blue-500 rounded-2xl blur-xl opacity-50 group-hover:opacity-75 transition-opacity" />
                   
-                  <label
-                    htmlFor="audioInput"
-                    className="relative block bg-gray-900/90 backdrop-blur-xl border border-gray-800 rounded-2xl p-12 text-center cursor-pointer overflow-hidden"
-                  >
+                  <div className="relative block bg-gray-900/90 backdrop-blur-xl border border-gray-800 rounded-2xl p-12 text-center overflow-hidden">
                     <div className="absolute inset-0 bg-gradient-to-br from-purple-500/10 to-blue-500/10" />
                     
                     <motion.div
@@ -449,22 +473,89 @@ export default function EditPage() {
                     >
                       <div className="w-24 h-24 mx-auto mb-6 bg-gradient-to-br from-purple-500 to-blue-500 rounded-full flex items-center justify-center">
                         <FileAudio className="w-12 h-12" />
-          </div>
-
+                      </div>
+                      
                       <h2 className="text-2xl font-bold mb-2">Import Audio</h2>
-                      <p className="text-gray-400">Click to upload your audio file</p>
-                      <p className="text-sm text-gray-500 mt-2">Supported formats: MP3, WAV, M4A</p>
+                      <p className="text-gray-400">Click to select audio source</p>
                     </motion.div>
-                    
-                <input
+                  </div>
+                </motion.div>
+              ) : showAudioOptions ? (
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.9 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  className="space-y-4"
+                >
+                  <h2 className="text-2xl font-bold text-center mb-6">Choose Audio Source</h2>
+                  
+                  {/* Import Audio File */}
+                  <label
+                    htmlFor="audioInput"
+                    className="block relative group cursor-pointer"
+                  >
+                    <motion.div
+                      whileHover={{ scale: 1.02 }}
+                      whileTap={{ scale: 0.98 }}
+                      className="relative"
+                    >
+                      <div className="absolute inset-0 bg-gradient-to-r from-purple-500 to-blue-500 rounded-xl blur-lg opacity-30 group-hover:opacity-50 transition-opacity" />
+                      <div className="relative bg-gray-900/90 backdrop-blur-xl border border-gray-800 rounded-xl p-6 flex items-center gap-4 hover:border-purple-500/50 transition-colors">
+                        <div className="w-16 h-16 bg-gradient-to-br from-purple-500 to-blue-500 rounded-full flex items-center justify-center flex-shrink-0">
+                          <Music className="w-8 h-8" />
+                        </div>
+                        <div className="text-left">
+                          <h3 className="text-lg font-semibold">Import Audio File</h3>
+                          <p className="text-sm text-gray-400">MP3, WAV, M4A, AAC, OGG</p>
+                        </div>
+                      </div>
+                    </motion.div>
+                    <input
                       ref={fileInputRef}
                       id="audioInput"
-                  type="file"
-                  accept="audio/*"
+                      type="file"
+                      accept="audio/*,.mp3,.wav,.m4a,.aac,.ogg,.weba,.webm"
                       onChange={handleAudioUpload}
-                  className="hidden"
-                />
+                      className="hidden"
+                    />
                   </label>
+
+                  {/* Import Audio from Video */}
+                  <label
+                    htmlFor="videoAudioInput"
+                    className="block relative group cursor-pointer"
+                  >
+                    <motion.div
+                      whileHover={{ scale: 1.02 }}
+                      whileTap={{ scale: 0.98 }}
+                      className="relative"
+                    >
+                      <div className="absolute inset-0 bg-gradient-to-r from-blue-500 to-purple-500 rounded-xl blur-lg opacity-30 group-hover:opacity-50 transition-opacity" />
+                      <div className="relative bg-gray-900/90 backdrop-blur-xl border border-gray-800 rounded-xl p-6 flex items-center gap-4 hover:border-blue-500/50 transition-colors">
+                        <div className="w-16 h-16 bg-gradient-to-br from-blue-500 to-purple-500 rounded-full flex items-center justify-center flex-shrink-0">
+                          <Video className="w-8 h-8" />
+                        </div>
+                        <div className="text-left">
+                          <h3 className="text-lg font-semibold">Extract Audio from Video</h3>
+                          <p className="text-sm text-gray-400">MP4, MOV, AVI, MKV, WebM</p>
+                        </div>
+                      </div>
+                    </motion.div>
+                    <input
+                      ref={videoForAudioInputRef}
+                      id="videoAudioInput"
+                      type="file"
+                      accept="video/*,.mp4,.mov,.avi,.mkv,.webm"
+                      onChange={handleVideoToAudioUpload}
+                      className="hidden"
+                    />
+                  </label>
+
+                  <button
+                    onClick={() => setShowAudioOptions(false)}
+                    className="w-full mt-4 text-sm text-gray-400 hover:text-white transition-colors"
+                  >
+                    Cancel
+                  </button>
                 </motion.div>
               ) : (
                 <motion.div
@@ -497,8 +588,8 @@ export default function EditPage() {
                     />
                   </div>
                 </motion.div>
-                )}
-              </div>
+              )}
+            </div>
           </motion.div>
         )}
 
@@ -876,8 +967,8 @@ export default function EditPage() {
               <div className="space-y-2">
                 <h2 className="text-2xl font-semibold">Exporting Your Video</h2>
                 <p className="text-gray-400 text-sm">{exportMessage}</p>
-              </div>
-              
+        </div>
+
               {/* Animated dots */}
               <div className="flex justify-center gap-3 mt-6">
                 {[0, 1, 2].map((i) => (
