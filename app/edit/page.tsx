@@ -281,14 +281,28 @@ export default function EditPage() {
         '4K': 'high'
       };
 
-      // Simulate more gradual progress
+      // More realistic progress simulation
       let progressInterval: NodeJS.Timeout;
       let currentProgress = 0;
+      let progressSpeed = 0.5; // Start slow
       
       progressInterval = setInterval(() => {
-        if (currentProgress < 90) {
-          currentProgress += Math.random() * 3 + 1; // Increment by 1-4%
-          currentProgress = Math.min(currentProgress, 90);
+        if (currentProgress < 98) {
+          // Vary the speed based on progress stage
+          if (currentProgress < 20) {
+            progressSpeed = 1.2; // Faster at start (uploading)
+          } else if (currentProgress < 40) {
+            progressSpeed = 0.8; // Medium speed
+          } else if (currentProgress < 70) {
+            progressSpeed = 0.6; // Slower during processing
+          } else if (currentProgress < 85) {
+            progressSpeed = 0.4; // Even slower
+          } else {
+            progressSpeed = 0.2; // Very slow near the end
+          }
+          
+          currentProgress += Math.random() * progressSpeed + 0.1;
+          currentProgress = Math.min(currentProgress, 98); // Cap at 98%
           setExportProgress(Math.round(currentProgress));
           
           // Update messages based on progress
@@ -296,17 +310,21 @@ export default function EditPage() {
             setExportMessage('Uploading files to the cloud...');
           } else if (currentProgress < 30) {
             setExportMessage('Analyzing beat patterns...');
-          } else if (currentProgress < 50) {
+          } else if (currentProgress < 45) {
             setExportMessage('Synchronizing video clips...');
-          } else if (currentProgress < 70) {
+          } else if (currentProgress < 60) {
             setExportMessage('Applying smooth transitions...');
+          } else if (currentProgress < 75) {
+            setExportMessage('Processing audio tracks...');
           } else if (currentProgress < 85) {
-            setExportMessage('Mixing audio tracks...');
-          } else {
+            setExportMessage('Optimizing video quality...');
+          } else if (currentProgress < 95) {
             setExportMessage('Finalizing your video...');
+          } else {
+            setExportMessage('Almost done...');
           }
         }
-      }, 500);
+      }, 200); // Update every 200ms for smoother progress
 
       const outputUrl = await processVideoWithBeatsDirect(
         videosForProcessing,
@@ -315,19 +333,31 @@ export default function EditPage() {
         `Rhythm Cut Export - ${new Date().toISOString()}`,
         qualityMap[exportQuality] as 'fast' | 'balanced' | 'high',
         (progress) => {
-          // Only update if actual progress is ahead of simulated
+          // Only update if actual progress is significantly ahead
           const realProgress = Math.round(progress * 100);
-          if (realProgress > currentProgress) {
-            currentProgress = realProgress;
-            setExportProgress(realProgress);
+          // Scale real progress to leave room for finalization
+          const scaledProgress = Math.round(realProgress * 0.95); // Max 95% from real progress
+          
+          if (scaledProgress > currentProgress + 5) {
+            // Jump ahead if real progress is significantly ahead
+            currentProgress = scaledProgress;
+            setExportProgress(scaledProgress);
           }
         }
       );
 
-      // Clear interval and set to 100%
+      // Clear interval and complete the progress
       clearInterval(progressInterval);
-      setExportProgress(100);
-      setExportMessage('Export complete!');
+      
+      // Smooth completion from current to 100%
+      const finalProgress = currentProgress;
+      for (let i = finalProgress; i <= 100; i++) {
+        await new Promise(resolve => setTimeout(resolve, 20));
+        setExportProgress(i);
+        if (i === 100) {
+          setExportMessage('Export complete!');
+        }
+      }
 
       // Trigger download
       const downloadLink = document.createElement('a');
@@ -355,7 +385,7 @@ export default function EditPage() {
       toast.error('Please add all video clips before preview');
       return;
     }
-    
+
     if (isPlaying) {
       audioRef.current.pause();
       previewVideoRef.current?.pause();
@@ -419,21 +449,21 @@ export default function EditPage() {
                     >
                       <div className="w-24 h-24 mx-auto mb-6 bg-gradient-to-br from-purple-500 to-blue-500 rounded-full flex items-center justify-center">
                         <FileAudio className="w-12 h-12" />
-                      </div>
-                      
+          </div>
+
                       <h2 className="text-2xl font-bold mb-2">Import Audio</h2>
                       <p className="text-gray-400">Click to upload your audio file</p>
                       <p className="text-sm text-gray-500 mt-2">Supported formats: MP3, WAV, M4A</p>
                     </motion.div>
                     
-                    <input
+                <input
                       ref={fileInputRef}
                       id="audioInput"
-                      type="file"
-                      accept="audio/*"
+                  type="file"
+                  accept="audio/*"
                       onChange={handleAudioUpload}
-                      className="hidden"
-                    />
+                  className="hidden"
+                />
                   </label>
                 </motion.div>
               ) : (
@@ -467,8 +497,8 @@ export default function EditPage() {
                     />
                   </div>
                 </motion.div>
-              )}
-            </div>
+                )}
+              </div>
           </motion.div>
         )}
 
@@ -554,21 +584,21 @@ export default function EditPage() {
                         </div>
                         <p className="text-gray-400 text-sm">Upload videos to see preview</p>
                       </div>
-                    </div>
-                  )}
-                  
+                </div>
+              )}
+
                   {/* Playback Controls */}
                   {audioUrl && (
                     <div className="absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-black/80 via-black/40 to-transparent">
                       <div className="flex items-center gap-3">
-                        <button
-                          onClick={togglePlayback}
+                    <button
+                      onClick={togglePlayback}
                           className="p-2 rounded-full bg-white/10 backdrop-blur-xl hover:bg-white/20 transition-colors"
                           disabled={beats.some(beat => !beat.videoClip)}
-                        >
-                          {isPlaying ? <Pause className="w-5 h-5" /> : <Play className="w-5 h-5" />}
-                        </button>
-                        
+                    >
+                      {isPlaying ? <Pause className="w-5 h-5" /> : <Play className="w-5 h-5" />}
+                    </button>
+
                         <div className="flex-1">
                           <div className="h-1 bg-white/20 rounded-full">
                             <div 
@@ -581,8 +611,8 @@ export default function EditPage() {
                         <span className="text-xs font-mono">
                           {formatTime(currentTime)} / {formatTime(duration)}
                         </span>
-                      </div>
-                      
+                    </div>
+
                       {beats.length > 0 && (
                         <div className="mt-2 text-xs text-gray-400 text-center">
                           Beat {currentPreviewBeat + 1} of {beats.length}
@@ -590,8 +620,8 @@ export default function EditPage() {
                       )}
                     </div>
                   )}
-                </div>
-              </div>
+                    </div>
+                  </div>
 
               {/* Timeline */}
               <div className="bg-gray-900/50 backdrop-blur-xl border border-gray-800/50 rounded-xl p-4">
@@ -603,7 +633,7 @@ export default function EditPage() {
                   <span className="text-xs text-gray-400">
                     {beats.filter(b => b.videoClip).length} / {beats.length} clips added
                   </span>
-                </div>
+                  </div>
 
                 <div className="relative">
                   <button
@@ -612,7 +642,7 @@ export default function EditPage() {
                   >
                     <ChevronLeft className="w-4 h-4" />
                   </button>
-                  
+
                   <button
                     onClick={() => scrollTimeline('right')}
                     className="absolute right-0 top-1/2 -translate-y-1/2 z-10 p-1.5 bg-gray-800/90 backdrop-blur rounded-full hover:bg-gray-700 transition-colors"
@@ -656,8 +686,8 @@ export default function EditPage() {
                                 <div className="absolute top-1 left-1 bg-black/70 px-1.5 py-0.5 rounded text-xs">
                                   <Check className="w-3 h-3 inline mr-1" />
                                   Edited
-                                </div>
-                              )}
+                    </div>
+                  )}
                               
                               {/* Hover Overlay */}
                               <AnimatePresence>
@@ -783,6 +813,13 @@ export default function EditPage() {
               animate={{ scale: 1, opacity: 1 }}
               className="text-center max-w-md"
             >
+              {/* Progress percentage above circle */}
+              <div className="mb-8">
+                <div className="text-5xl font-bold bg-gradient-to-r from-purple-400 to-blue-400 bg-clip-text text-transparent">
+                  {exportProgress}%
+                </div>
+              </div>
+
               {/* Animated Logo */}
               <div className="relative w-40 h-40 mx-auto mb-8">
                 {/* Outer glow ring */}
@@ -795,16 +832,10 @@ export default function EditPage() {
                   className="absolute inset-0 bg-gradient-to-r from-purple-500 to-blue-500 rounded-full blur-2xl"
                 />
                 
-                {/* Main circle */}
-                <motion.div
-                  animate={{ rotate: 360 }}
-                  transition={{ duration: 3, repeat: Infinity, ease: "linear" }}
-                  className="absolute inset-4"
-                >
-                  <div className="absolute inset-0 bg-gradient-to-r from-purple-600 to-blue-600 rounded-full shadow-2xl" />
-                </motion.div>
+                {/* Main circle background */}
+                <div className="absolute inset-4 bg-gradient-to-r from-purple-600 to-blue-600 rounded-full" />
                 
-                {/* Inner circle */}
+                {/* Inner circle with icon */}
                 <div className="absolute inset-8 bg-gray-900 rounded-full flex items-center justify-center">
                   <Film className="w-16 h-16 text-white" />
                 </div>
@@ -839,19 +870,16 @@ export default function EditPage() {
                     </linearGradient>
                   </defs>
                 </svg>
-
-                {/* Progress text */}
-                <div className="absolute inset-0 flex items-center justify-center">
-                  <div className="text-5xl font-bold bg-gradient-to-r from-purple-400 to-blue-400 bg-clip-text text-transparent">
-                    {exportProgress}%
-                  </div>
-                </div>
               </div>
 
-              <h2 className="text-2xl font-bold mb-2">Exporting Your Video</h2>
-              <p className="text-gray-400 mb-6">{exportMessage}</p>
+              {/* Text below circle */}
+              <div className="space-y-2">
+                <h2 className="text-2xl font-semibold">Exporting Your Video</h2>
+                <p className="text-gray-400 text-sm">{exportMessage}</p>
+              </div>
               
-              <div className="flex justify-center gap-3 mt-8">
+              {/* Animated dots */}
+              <div className="flex justify-center gap-3 mt-6">
                 {[0, 1, 2].map((i) => (
                   <motion.div
                     key={i}
@@ -903,7 +931,7 @@ export default function EditPage() {
               >
                 Create Another Video
               </button>
-            </div>
+      </div>
           </motion.div>
         )}
       </AnimatePresence>
