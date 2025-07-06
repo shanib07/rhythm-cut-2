@@ -930,37 +930,6 @@ export default function EditPage() {
                 <div className="absolute inset-8 bg-gray-900 rounded-full flex items-center justify-center">
                   <Film className="w-16 h-16 text-white" />
                 </div>
-                
-                {/* Progress Ring */}
-                <svg className="absolute inset-0 -rotate-90">
-                  <circle
-                    cx="80"
-                    cy="80"
-                    r="76"
-                    stroke="rgba(255,255,255,0.1)"
-                    strokeWidth="8"
-                    fill="none"
-                  />
-                  <circle
-                    cx="80"
-                    cy="80"
-                    r="76"
-                    stroke="url(#gradient)"
-                    strokeWidth="8"
-                    fill="none"
-                    strokeLinecap="round"
-                    strokeDasharray={`${2 * Math.PI * 76}`}
-                    strokeDashoffset={`${2 * Math.PI * 76 * (1 - exportProgress / 100)}`}
-                    className="transition-all duration-500"
-                  />
-                  <defs>
-                    <linearGradient id="gradient" x1="0%" y1="0%" x2="100%" y2="100%">
-                      <stop offset="0%" stopColor="#a855f7" />
-                      <stop offset="50%" stopColor="#6366f1" />
-                      <stop offset="100%" stopColor="#3b82f6" />
-                    </linearGradient>
-                  </defs>
-                </svg>
               </div>
 
               {/* Text below circle */}
