@@ -534,7 +534,7 @@ export const processVideoWithBeatsDirect = async (
       throw new Error('Audio file is required');
     }
 
-    // Upload all video files first
+    // Upload all video files first (0-20%)
     console.log('🚀 DIRECT: Uploading videos...');
     onProgress?.(0.05);
     const uploadedVideos = [];
@@ -552,19 +552,32 @@ export const processVideoWithBeatsDirect = async (
         duration: metadata.duration
       });
       
-      onProgress?.(0.05 + (i + 1) / videos.length * 0.2);
+      onProgress?.(0.05 + (i + 1) / videos.length * 0.15); // 5-20%
     }
 
-    // Upload audio file
+    // Upload audio file (20-25%)
     console.log('🚀 DIRECT: Uploading audio file...');
-    onProgress?.(0.25);
+    onProgress?.(0.20);
     const audioUrl = await uploadVideoFile(audioFile); // This can handle audio files too
+    onProgress?.(0.25);
     
     console.log('🚀 DIRECT: Starting direct processing...');
-    onProgress?.(0.3);
+    onProgress?.(0.30);
 
     // Call direct processing endpoint
     const startProcessingTime = Date.now();
+    
+    // Start simulated progress for server processing
+    let simulatedProgress = 0.30;
+    const progressInterval = setInterval(() => {
+      if (simulatedProgress < 0.85) {
+        // Gradually increase progress
+        const increment = Math.random() * 0.02 + 0.01; // 1-3% increment
+        simulatedProgress = Math.min(simulatedProgress + increment, 0.85);
+        onProgress?.(simulatedProgress);
+      }
+    }, 300); // Update every 300ms
+
     const response = await fetch('/api/process-direct', {
       method: 'POST',
       headers: {
@@ -579,10 +592,16 @@ export const processVideoWithBeatsDirect = async (
       })
     });
 
+    // Clear interval when response arrives
+    clearInterval(progressInterval);
+
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({ error: 'Processing failed' }));
       throw new Error(`Direct processing failed: ${errorData.error || errorData.details || response.statusText}`);
     }
+
+    // Progress to 90% when response received
+    onProgress?.(0.90);
 
     const { success, outputUrl, processingTime } = await response.json();
     
@@ -598,6 +617,7 @@ export const processVideoWithBeatsDirect = async (
       method: quality
     });
 
+    // Complete progress
     onProgress?.(1.0);
     return outputUrl;
 

@@ -2,7 +2,7 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Upload, Loader2, Play, Pause, Download, Edit2, Plus, FileAudio, Settings, Sparkles, Film, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Upload, Loader2, Play, Pause, Download, Edit2, Plus, FileAudio, Settings, Sparkles, Film, ChevronLeft, ChevronRight, Check, Info } from 'lucide-react';
 import { AudioAnalyzer } from '@/src/services/AudioAnalyzer';
 import { toast } from 'sonner';
 import { useVideoStore } from '@/src/stores/videoStore';
@@ -41,8 +41,7 @@ export default function EditPage() {
   const [showSettings, setShowSettings] = useState(false);
   const [editingBeatIndex, setEditingBeatIndex] = useState<number | null>(null);
   const [videoDurations, setVideoDurations] = useState<Record<string, number>>({});
-  const [isRenderingPreview, setIsRenderingPreview] = useState(false);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [currentPreviewBeat, setCurrentPreviewBeat] = useState<number>(0);
 
   // Refs
   const audioFileRef = useRef<File | null>(null);
@@ -85,7 +84,22 @@ export default function EditPage() {
   useEffect(() => {
     if (audioRef.current) {
       const handleTimeUpdate = () => {
-        setCurrentTime(audioRef.current!.currentTime);
+        const time = audioRef.current!.currentTime;
+        setCurrentTime(time);
+        
+        // Find which beat we're in for preview sync
+        if (beats.length > 0 && isPlaying) {
+          const beatIndex = beats.findIndex((beat, index) => {
+            const nextBeat = beats[index + 1];
+            const endTime = nextBeat ? nextBeat.time : duration;
+            return time >= beat.time && time < endTime;
+          });
+          
+          if (beatIndex !== -1 && beatIndex !== currentPreviewBeat) {
+            setCurrentPreviewBeat(beatIndex);
+            updateVideoPreview(beatIndex);
+          }
+        }
       };
       
       const handleLoadedMetadata = () => {
@@ -100,7 +114,21 @@ export default function EditPage() {
         audioRef.current?.removeEventListener('loadedmetadata', handleLoadedMetadata);
       };
     }
-  }, [audioUrl]);
+  }, [audioUrl, beats, isPlaying, currentPreviewBeat, duration]);
+
+  // Update video preview based on current beat
+  const updateVideoPreview = (beatIndex: number) => {
+    if (!previewVideoRef.current || !beats[beatIndex]?.videoClip) return;
+    
+    const beat = beats[beatIndex];
+    if (beat.videoClip && previewVideoRef.current.src !== beat.videoClip.url) {
+      previewVideoRef.current.src = beat.videoClip.url;
+      previewVideoRef.current.currentTime = beat.videoClip.startTime || 0;
+      if (isPlaying) {
+        previewVideoRef.current.play().catch(console.error);
+      }
+    }
+  };
 
   // Audio Upload Handler
   const handleAudioUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -217,35 +245,16 @@ export default function EditPage() {
     // Check if all beats have videos
     const allBeatsHaveVideos = newBeats.every(beat => beat.videoClip);
     if (allBeatsHaveVideos) {
-      toast.success('All beats have video clips assigned!');
-      // Render preview automatically
-      renderPreview();
-    }
-  };
-
-  // Render preview for playback
-  const renderPreview = async () => {
-    if (!audioFileRef.current || beats.some(beat => !beat.videoClip)) return;
-    
-    setIsRenderingPreview(true);
-    toast.info('Rendering preview...');
-    
-    try {
-      // For now, we'll just use the first video as preview
-      // In production, this should create a low-quality proxy render
-      const firstBeat = beats[0];
-      if (firstBeat?.videoClip) {
-        setPreviewUrl(firstBeat.videoClip.url);
+      toast.success('All beats have video clips assigned! You can now preview or export.');
+      
+      // Set first video as preview
+      if (newBeats[0]?.videoClip && previewVideoRef.current) {
+        previewVideoRef.current.src = newBeats[0].videoClip.url;
       }
-    } catch (error) {
-      console.error('Error rendering preview:', error);
-      toast.error('Failed to render preview');
-    } finally {
-      setIsRenderingPreview(false);
     }
   };
 
-  // Export Handler
+  // Export Handler with fixed progress
   const handleExport = async () => {
     if (!audioFileRef.current || beats.some(beat => !beat.videoClip)) {
       toast.error('Please ensure all beats have video clips assigned');
@@ -272,14 +281,32 @@ export default function EditPage() {
         '4K': 'high'
       };
 
-      const messages = [
-        'Uploading files to the cloud...',
-        'Analyzing beat patterns...',
-        'Synchronizing video clips...',
-        'Applying transitions...',
-        'Mixing audio tracks...',
-        'Finalizing your video...'
-      ];
+      // Simulate more gradual progress
+      let progressInterval: NodeJS.Timeout;
+      let currentProgress = 0;
+      
+      progressInterval = setInterval(() => {
+        if (currentProgress < 90) {
+          currentProgress += Math.random() * 3 + 1; // Increment by 1-4%
+          currentProgress = Math.min(currentProgress, 90);
+          setExportProgress(Math.round(currentProgress));
+          
+          // Update messages based on progress
+          if (currentProgress < 15) {
+            setExportMessage('Uploading files to the cloud...');
+          } else if (currentProgress < 30) {
+            setExportMessage('Analyzing beat patterns...');
+          } else if (currentProgress < 50) {
+            setExportMessage('Synchronizing video clips...');
+          } else if (currentProgress < 70) {
+            setExportMessage('Applying smooth transitions...');
+          } else if (currentProgress < 85) {
+            setExportMessage('Mixing audio tracks...');
+          } else {
+            setExportMessage('Finalizing your video...');
+          }
+        }
+      }, 500);
 
       const outputUrl = await processVideoWithBeatsDirect(
         videosForProcessing,
@@ -288,11 +315,19 @@ export default function EditPage() {
         `Rhythm Cut Export - ${new Date().toISOString()}`,
         qualityMap[exportQuality] as 'fast' | 'balanced' | 'high',
         (progress) => {
-          setExportProgress(Math.round(progress * 100));
-          const messageIndex = Math.min(Math.floor(progress * messages.length), messages.length - 1);
-          setExportMessage(messages[messageIndex]);
+          // Only update if actual progress is ahead of simulated
+          const realProgress = Math.round(progress * 100);
+          if (realProgress > currentProgress) {
+            currentProgress = realProgress;
+            setExportProgress(realProgress);
+          }
         }
       );
+
+      // Clear interval and set to 100%
+      clearInterval(progressInterval);
+      setExportProgress(100);
+      setExportMessage('Export complete!');
 
       // Trigger download
       const downloadLink = document.createElement('a');
@@ -302,8 +337,10 @@ export default function EditPage() {
       downloadLink.click();
       document.body.removeChild(downloadLink);
 
-      toast.success('Video exported successfully!');
-      setCurrentStep('export');
+      setTimeout(() => {
+        toast.success('Video exported successfully!');
+        setCurrentStep('export');
+      }, 500);
     } catch (error) {
       console.error('Export error:', error);
       toast.error('Failed to export video');
@@ -314,12 +351,17 @@ export default function EditPage() {
 
   // Play/Pause Handler
   const togglePlayback = () => {
-    if (!audioRef.current) return;
+    if (!audioRef.current || beats.some(beat => !beat.videoClip)) {
+      toast.error('Please add all video clips before preview');
+      return;
+    }
     
     if (isPlaying) {
       audioRef.current.pause();
       previewVideoRef.current?.pause();
     } else {
+      // Start from current beat
+      updateVideoPreview(currentPreviewBeat);
       audioRef.current.play();
       previewVideoRef.current?.play();
     }
@@ -481,19 +523,28 @@ export default function EditPage() {
               </div>
             </div>
 
+            {/* Helper message */}
+            {beats.filter(b => !b.videoClip).length > 0 && (
+              <div className="px-6 py-2 bg-blue-500/10 border-b border-blue-500/20">
+                <p className="text-sm text-blue-300 flex items-center gap-2">
+                  <Info className="w-4 h-4" />
+                  Please add {beats.filter(b => !b.videoClip).length} more video{beats.filter(b => !b.videoClip).length > 1 ? 's' : ''} to match the detected beats
+                </p>
+              </div>
+            )}
+
             {/* Main Content */}
             <div className="flex-1 flex flex-col p-6 gap-4">
               {/* Preview Area */}
               <div className="flex-1 relative max-h-[50vh]">
                 <div className="absolute inset-0 bg-gradient-to-br from-purple-500/10 via-transparent to-blue-500/10 rounded-xl" />
                 <div className="relative h-full bg-gray-900/50 backdrop-blur-xl border border-gray-800/50 rounded-xl overflow-hidden">
-                  {previewUrl || (selectedBeatIndex !== null && beats[selectedBeatIndex]?.videoClip) ? (
+                  {beats[0]?.videoClip ? (
                     <video
                       ref={previewVideoRef}
-                      src={previewUrl || beats[selectedBeatIndex!]?.videoClip?.url}
                       className="w-full h-full object-contain"
                       controls={false}
-                      muted={!previewUrl}
+                      muted
                     />
                   ) : (
                     <div className="flex items-center justify-center h-full">
@@ -507,13 +558,13 @@ export default function EditPage() {
                   )}
                   
                   {/* Playback Controls */}
-                  {(previewUrl || audioUrl) && (
+                  {audioUrl && (
                     <div className="absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-black/80 via-black/40 to-transparent">
                       <div className="flex items-center gap-3">
                         <button
                           onClick={togglePlayback}
                           className="p-2 rounded-full bg-white/10 backdrop-blur-xl hover:bg-white/20 transition-colors"
-                          disabled={!audioUrl}
+                          disabled={beats.some(beat => !beat.videoClip)}
                         >
                           {isPlaying ? <Pause className="w-5 h-5" /> : <Play className="w-5 h-5" />}
                         </button>
@@ -531,15 +582,12 @@ export default function EditPage() {
                           {formatTime(currentTime)} / {formatTime(duration)}
                         </span>
                       </div>
-                    </div>
-                  )}
-                  
-                  {isRenderingPreview && (
-                    <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
-                      <div className="text-center">
-                        <Loader2 className="w-8 h-8 animate-spin mx-auto mb-2" />
-                        <p className="text-sm">Rendering preview...</p>
-                      </div>
+                      
+                      {beats.length > 0 && (
+                        <div className="mt-2 text-xs text-gray-400 text-center">
+                          Beat {currentPreviewBeat + 1} of {beats.length}
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -588,12 +636,14 @@ export default function EditPage() {
                         onClick={() => {
                           if (beat.videoClip) {
                             setSelectedBeatIndex(index);
+                            setCurrentPreviewBeat(index);
+                            updateVideoPreview(index);
                           }
                         }}
                       >
                         <div className={`relative w-32 h-20 rounded-lg overflow-hidden cursor-pointer transition-all ${
                           selectedBeatIndex === index ? 'ring-2 ring-purple-500' : ''
-                        }`}>
+                        } ${currentPreviewBeat === index && isPlaying ? 'ring-2 ring-green-500' : ''}`}>
                           {beat.videoClip ? (
                             <>
                               <img
@@ -601,6 +651,13 @@ export default function EditPage() {
                                 alt={beat.videoClip.name}
                                 className="w-full h-full object-cover"
                               />
+                              
+                              {beat.videoClip.startTime && beat.videoClip.startTime > 0 && (
+                                <div className="absolute top-1 left-1 bg-black/70 px-1.5 py-0.5 rounded text-xs">
+                                  <Check className="w-3 h-3 inline mr-1" />
+                                  Edited
+                                </div>
+                              )}
                               
                               {/* Hover Overlay */}
                               <AnimatePresence>
@@ -727,63 +784,86 @@ export default function EditPage() {
               className="text-center max-w-md"
             >
               {/* Animated Logo */}
-              <div className="relative w-32 h-32 mx-auto mb-8">
+              <div className="relative w-40 h-40 mx-auto mb-8">
+                {/* Outer glow ring */}
+                <motion.div
+                  animate={{ 
+                    scale: [1, 1.2, 1],
+                    opacity: [0.3, 0.6, 0.3]
+                  }}
+                  transition={{ duration: 2, repeat: Infinity }}
+                  className="absolute inset-0 bg-gradient-to-r from-purple-500 to-blue-500 rounded-full blur-2xl"
+                />
+                
+                {/* Main circle */}
                 <motion.div
                   animate={{ rotate: 360 }}
                   transition={{ duration: 3, repeat: Infinity, ease: "linear" }}
-                  className="absolute inset-0"
+                  className="absolute inset-4"
                 >
-                  <div className="absolute inset-0 bg-gradient-to-r from-purple-500 to-blue-500 rounded-full blur-xl opacity-50" />
-                  <div className="absolute inset-0 bg-gradient-to-r from-purple-500 to-blue-500 rounded-full" />
+                  <div className="absolute inset-0 bg-gradient-to-r from-purple-600 to-blue-600 rounded-full shadow-2xl" />
                 </motion.div>
                 
-                <div className="absolute inset-0 flex items-center justify-center">
+                {/* Inner circle */}
+                <div className="absolute inset-8 bg-gray-900 rounded-full flex items-center justify-center">
                   <Film className="w-16 h-16 text-white" />
                 </div>
                 
                 {/* Progress Ring */}
                 <svg className="absolute inset-0 -rotate-90">
                   <circle
-                    cx="64"
-                    cy="64"
-                    r="60"
+                    cx="80"
+                    cy="80"
+                    r="76"
                     stroke="rgba(255,255,255,0.1)"
                     strokeWidth="8"
                     fill="none"
                   />
                   <circle
-                    cx="64"
-                    cy="64"
-                    r="60"
+                    cx="80"
+                    cy="80"
+                    r="76"
                     stroke="url(#gradient)"
                     strokeWidth="8"
                     fill="none"
-                    strokeDasharray={`${2 * Math.PI * 60}`}
-                    strokeDashoffset={`${2 * Math.PI * 60 * (1 - exportProgress / 100)}`}
+                    strokeLinecap="round"
+                    strokeDasharray={`${2 * Math.PI * 76}`}
+                    strokeDashoffset={`${2 * Math.PI * 76 * (1 - exportProgress / 100)}`}
                     className="transition-all duration-500"
                   />
                   <defs>
                     <linearGradient id="gradient" x1="0%" y1="0%" x2="100%" y2="100%">
                       <stop offset="0%" stopColor="#a855f7" />
+                      <stop offset="50%" stopColor="#6366f1" />
                       <stop offset="100%" stopColor="#3b82f6" />
                     </linearGradient>
                   </defs>
                 </svg>
+
+                {/* Progress text */}
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <div className="text-5xl font-bold bg-gradient-to-r from-purple-400 to-blue-400 bg-clip-text text-transparent">
+                    {exportProgress}%
+                  </div>
+                </div>
               </div>
 
               <h2 className="text-2xl font-bold mb-2">Exporting Your Video</h2>
               <p className="text-gray-400 mb-6">{exportMessage}</p>
               
-              <div className="text-4xl font-bold bg-gradient-to-r from-purple-500 to-blue-500 bg-clip-text text-transparent">
-                {exportProgress}%
-              </div>
-              
-              <div className="mt-8 flex justify-center gap-2">
+              <div className="flex justify-center gap-3 mt-8">
                 {[0, 1, 2].map((i) => (
                   <motion.div
                     key={i}
-                    animate={{ scale: [1, 1.5, 1] }}
-                    transition={{ duration: 1.5, repeat: Infinity, delay: i * 0.2 }}
+                    animate={{ 
+                      scale: [1, 1.5, 1],
+                      opacity: [0.3, 1, 0.3]
+                    }}
+                    transition={{ 
+                      duration: 1.5, 
+                      repeat: Infinity, 
+                      delay: i * 0.2 
+                    }}
                     className="w-3 h-3 bg-gradient-to-r from-purple-500 to-blue-500 rounded-full"
                   />
                 ))}
@@ -817,6 +897,7 @@ export default function EditPage() {
                   setCurrentStep('audio');
                   setBeats([]);
                   setSelectedBeatIndex(null);
+                  setCurrentPreviewBeat(0);
                 }}
                 className="px-6 py-3 bg-gradient-to-r from-purple-500 to-blue-500 rounded-lg font-medium hover:shadow-lg hover:shadow-purple-500/25 transition-all"
               >
