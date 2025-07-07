@@ -387,14 +387,14 @@ export default function EasyEditPage() {
                              hover:border-[#06B6D4] transition-colors cursor-pointer
                              hover:bg-[#06B6D4]/5"
                   >
-                    <input
-                      ref={videoForAudioInputRef}
-                      type="file"
-                      id="videoToAudioUpload"
-                      accept="video/*,.mp4,.mov,.avi,.mkv,.webm"
-                      onChange={handleVideoToAudioFileChange}
-                      className="hidden"
-                    />
+                                         <input
+                       ref={videoForAudioInputRef}
+                       type="file"
+                       id="videoToAudioUpload"
+                       accept="video/*,.mp4,.mov,.avi,.mkv,.webm,.m4v,.3gp,.wmv"
+                       onChange={handleVideoToAudioFileChange}
+                       className="hidden"
+                     />
                     <div className="flex items-center gap-4">
                       <div className="w-14 h-14 bg-[#0891B2]/20 rounded-full flex items-center justify-center">
                         <Video className="w-8 h-8 text-[#0891B2]" />
@@ -450,7 +450,7 @@ export default function EasyEditPage() {
                   ref={videoInputRef}
                   type="file"
                   id="videoUpload"
-                  accept="video/*"
+                  accept="video/*,.mp4,.mov,.avi,.mkv,.webm,.m4v,.3gp,.wmv"
                   multiple
                   onChange={handleVideoFileChange}
                   className="hidden"

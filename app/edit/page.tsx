@@ -544,7 +544,7 @@ export default function EditPage() {
                       ref={videoForAudioInputRef}
                       id="videoAudioInput"
                       type="file"
-                      accept="video/*,.mp4,.mov,.avi,.mkv,.webm"
+                      accept="video/*,.mp4,.mov,.avi,.mkv,.webm,.m4v,.3gp,.wmv"
                       onChange={handleVideoToAudioUpload}
                       className="hidden"
                     />
@@ -618,7 +618,7 @@ export default function EditPage() {
                       id="video-bulk"
                       ref={videoFileInputRef}
                       type="file"
-                      accept="video/*"
+                      accept="video/*,.mp4,.mov,.avi,.mkv,.webm,.m4v,.3gp,.wmv"
                       multiple
                       onChange={handleVideoUpload}
                       className="hidden"
@@ -811,7 +811,7 @@ export default function EditPage() {
                               <input
                                 id={`video-${index}`}
                                 type="file"
-                                accept="video/*"
+                                accept="video/*,.mp4,.mov,.avi,.mkv,.webm,.m4v,.3gp,.wmv"
                                 onChange={(e) => handleVideoUpload(e, index)}
                                 className="hidden"
                               />
