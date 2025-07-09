@@ -17,26 +17,6 @@ export async function POST(req: NextRequest) {
   });
 
   try {
-    // Check if FFmpeg is available
-    try {
-      await new Promise<void>((resolve, reject) => {
-        ffmpeg.ffprobe((err, data) => {
-          if (err) {
-            console.error('FFmpeg check failed:', err);
-            reject(new Error('FFmpeg not available'));
-          } else {
-            console.log('FFmpeg is available');
-            resolve();
-          }
-        });
-      });
-    } catch (ffmpegError) {
-      console.error('FFmpeg not available:', ffmpegError);
-      return NextResponse.json(
-        { error: 'Video processing is temporarily unavailable' },
-        { status: 503 }
-      );
-    }
     const body = await req.json();
     const { name, inputVideos, beatMarkers, audioUrl, quality = 'balanced' }: {
       name: string;
