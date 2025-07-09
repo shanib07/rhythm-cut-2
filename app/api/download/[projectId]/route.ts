@@ -25,15 +25,17 @@ export async function GET(
     const exportPath = path.join(process.cwd(), 'public', 'exports', `${projectId}.mp4`);
     try {
       await fs.access(exportPath);
-      // File exists, return it directly
+      // File exists, return it directly (no auth required for direct exports)
       const fileData = await fs.readFile(exportPath);
+      
+      console.log('Direct export file found and serving:', exportPath);
       
       // Optional: Clean up the file after sending
       setTimeout(() => {
         fs.unlink(exportPath).catch(err => 
           console.log('Failed to cleanup export file:', err.message)
         );
-      }, 5000); // Clean up after 5 seconds
+      }, 10000); // Clean up after 10 seconds
       
       return new Response(fileData, {
         headers: {
@@ -45,7 +47,7 @@ export async function GET(
       });
     } catch (error) {
       // File doesn't exist in exports, continue with database check
-      console.log('Export file not found, checking database...');
+      console.log('Export file not found, checking database...', error);
     }
     
     const session = await getServerSession();
