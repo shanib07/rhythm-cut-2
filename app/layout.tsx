@@ -33,14 +33,16 @@ export default function RootLayout({
           position="bottom-right" 
           toastOptions={{
             style: {
-              color: '#000000 !important',
-              backgroundColor: '#ffffff !important',
-              border: '1px solid #e5e7eb !important',
-              fontSize: '14px !important',
-              fontWeight: '500 !important',
-              padding: '12px 16px !important',
-              borderRadius: '8px !important',
-              boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15) !important'
+              color: '#000000',
+              backgroundColor: '#ffffff',
+              border: '2px solid #374151',
+              fontSize: '14px',
+              fontWeight: '600',
+              padding: '16px 20px',
+              borderRadius: '12px',
+              boxShadow: '0 8px 24px rgba(0, 0, 0, 0.3)',
+              minHeight: '56px',
+              zIndex: 9999
             },
             className: 'custom-toast'
           }}

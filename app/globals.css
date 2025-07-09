@@ -48,44 +48,69 @@ h1, h2, h3, h4, h5, h6 {
   color: var(--text-primary);
 }
 
-/* Toast styling to ensure visibility */
+/* Toast styling to ensure visibility - STRONGEST OVERRIDES */
 [data-sonner-toast] {
   background-color: #ffffff !important;
-  border: 1px solid #e5e7eb !important;
+  border: 2px solid #374151 !important;
   color: #000000 !important;
   font-size: 14px !important;
-  font-weight: 500 !important;
-  padding: 12px 16px !important;
-  border-radius: 8px !important;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15) !important;
-  min-height: 48px !important;
+  font-weight: 600 !important;
+  padding: 16px 20px !important;
+  border-radius: 12px !important;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3) !important;
+  min-height: 56px !important;
   display: flex !important;
   align-items: center !important;
+  z-index: 9999 !important;
 }
 
-[data-sonner-toast] * {
+[data-sonner-toast] *,
+[data-sonner-toast] div,
+[data-sonner-toast] span,
+[data-sonner-toast] p,
+[data-sonner-toast] strong {
   color: #000000 !important;
+  background: transparent !important;
 }
 
 [data-sonner-toast][data-type="success"] {
-  background-color: #f0f9ff !important;
-  border-color: #0ea5e9 !important;
+  background-color: #f0fdf4 !important;
+  border-color: #22c55e !important;
+  color: #166534 !important;
+}
+
+[data-sonner-toast][data-type="success"] * {
+  color: #166534 !important;
 }
 
 [data-sonner-toast][data-type="error"] {
   background-color: #fef2f2 !important;
   border-color: #ef4444 !important;
+  color: #991b1b !important;
+}
+
+[data-sonner-toast][data-type="error"] * {
+  color: #991b1b !important;
 }
 
 [data-sonner-toast][data-type="info"] {
-  background-color: #f0f4ff !important;
-  border-color: #8b5cf6 !important;
+  background-color: #eff6ff !important;
+  border-color: #3b82f6 !important;
+  color: #1e40af !important;
+}
+
+[data-sonner-toast][data-type="info"] * {
+  color: #1e40af !important;
 }
 
 /* Ensure toast text is always visible */
 .custom-toast {
   color: #000000 !important;
   background-color: #ffffff !important;
+}
+
+.custom-toast * {
+  color: #000000 !important;
 }
 
 p, span, div, label {
