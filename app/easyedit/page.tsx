@@ -200,13 +200,13 @@ export default function EasyEditPage() {
         beats,
         audioFile,
         'Easy Edit Video',
-        'balanced', // Use balanced quality as requested
+        'balanced', // Always use balanced quality for stability
         (progress) => {
-          setProgress(30 + progress * 70); // 30-100% for video processing
+          setProgress(Math.round(progress * 100));
           const stage = progress < 0.3 ? 'Uploading files' : 
                        progress < 0.9 ? 'Processing video' : 
                        'Finalizing';
-          setProgressMessage(`${stage}... ${Math.round(progress * 100)}%`);
+          setProgressMessage(`${stage}...`);
         }
       );
 

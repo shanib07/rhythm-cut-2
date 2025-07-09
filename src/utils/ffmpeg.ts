@@ -534,9 +534,9 @@ export const processVideoWithBeatsDirect = async (
       throw new Error('Audio file is required');
     }
 
-    // Upload all video files first (0-15%)
+    // Upload all video files first (0-20%)
     console.log('🚀 DIRECT: Uploading videos...');
-    onProgress?.(0.02);
+    onProgress?.(0.05);
     const uploadedVideos = [];
     
     for (let i = 0; i < videos.length; i++) {
@@ -552,44 +552,21 @@ export const processVideoWithBeatsDirect = async (
         duration: metadata.duration
       });
       
-      onProgress?.(0.02 + (i + 1) / videos.length * 0.13); // 2-15%
+      onProgress?.(0.05 + (i + 1) / videos.length * 0.15); // 5-20%
     }
 
-    // Upload audio file (15-20%)
+    // Upload audio file (20-25%)
     console.log('🚀 DIRECT: Uploading audio file...');
-    onProgress?.(0.15);
-    const audioUrl = await uploadVideoFile(audioFile);
     onProgress?.(0.20);
+    const audioUrl = await uploadVideoFile(audioFile);
+    onProgress?.(0.25);
     
     console.log('🚀 DIRECT: Starting direct processing...');
-    onProgress?.(0.25);
+    onProgress?.(0.30);
 
     // Call direct processing endpoint
     const startProcessingTime = Date.now();
     
-    // Start more gradual simulated progress for server processing
-    let simulatedProgress = 0.25;
-    let progressSpeed = 0.008; // Slower initial speed
-    const progressInterval = setInterval(() => {
-      if (simulatedProgress < 0.90) {
-        // Gradually slow down as we progress
-        if (simulatedProgress < 0.40) {
-          progressSpeed = 0.006;
-        } else if (simulatedProgress < 0.60) {
-          progressSpeed = 0.004;
-        } else if (simulatedProgress < 0.80) {
-          progressSpeed = 0.003;
-        } else {
-          progressSpeed = 0.002;
-        }
-        
-        // Add some randomness for realism
-        const increment = progressSpeed + (Math.random() * 0.002 - 0.001);
-        simulatedProgress = Math.min(simulatedProgress + increment, 0.90);
-        onProgress?.(simulatedProgress);
-      }
-    }, 100); // Update every 100ms for smoother progress
-
     const response = await fetch('/api/process-direct', {
       method: 'POST',
       headers: {
@@ -604,25 +581,19 @@ export const processVideoWithBeatsDirect = async (
       })
     });
 
-    // Clear interval when response arrives
-    clearInterval(progressInterval);
-
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({ error: 'Processing failed' }));
       throw new Error(`Direct processing failed: ${errorData.error || errorData.details || response.statusText}`);
     }
 
-    // Progress to 92% when response received
-    onProgress?.(0.92);
+    // Simple progress update
+    onProgress?.(0.90);
 
     const { success, outputUrl, processingTime } = await response.json();
     
     if (!success) {
       throw new Error('Direct processing failed');
     }
-
-    // Gradual progress to 95%
-    onProgress?.(0.95);
 
     const totalProcessingTime = Date.now() - startProcessingTime;
     console.log('🚀 DIRECT: Processing completed', {
@@ -632,8 +603,8 @@ export const processVideoWithBeatsDirect = async (
       method: quality
     });
 
-    // Complete progress (frontend will handle 95-100%)
-    onProgress?.(0.98);
+    // Complete progress
+    onProgress?.(1.0);
     return outputUrl;
 
   } catch (error) {

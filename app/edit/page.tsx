@@ -2,7 +2,7 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Upload, Loader2, Play, Pause, Download, Edit2, Plus, FileAudio, Settings, Sparkles, Film, ChevronLeft, ChevronRight, Check, Info, Music, Video } from 'lucide-react';
+import { Upload, Loader2, Play, Pause, Download, Edit2, Plus, FileAudio, Sparkles, Film, ChevronLeft, ChevronRight, Check, Info, Music, Video } from 'lucide-react';
 import { AudioAnalyzer } from '@/src/services/AudioAnalyzer';
 import { toast } from 'sonner';
 import { useVideoStore } from '@/src/stores/videoStore';
@@ -33,12 +33,12 @@ export default function EditPage() {
   const [isExporting, setIsExporting] = useState(false);
   const [exportProgress, setExportProgress] = useState(0);
   const [exportMessage, setExportMessage] = useState('');
-  const [exportQuality, setExportQuality] = useState<'720p' | '1080p' | '4K'>('1080p');
+  // Removed export quality state - always use balanced quality
   const [hoveredBeatIndex, setHoveredBeatIndex] = useState<number | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
-  const [showSettings, setShowSettings] = useState(false);
+  // Removed showSettings state - no longer needed
   const [editingBeatIndex, setEditingBeatIndex] = useState<number | null>(null);
   const [videoDurations, setVideoDurations] = useState<Record<string, number>>({});
   const [currentPreviewBeat, setCurrentPreviewBeat] = useState<number>(0);
@@ -82,26 +82,12 @@ export default function EditPage() {
     };
   }, []);
 
-  // Audio time update handler
+  // Audio time update handler - simplified
   useEffect(() => {
     if (audioRef.current) {
       const handleTimeUpdate = () => {
         const time = audioRef.current!.currentTime;
         setCurrentTime(time);
-        
-        // Find which beat we're in for preview sync
-        if (beats.length > 0 && isPlaying) {
-          const beatIndex = beats.findIndex((beat, index) => {
-            const nextBeat = beats[index + 1];
-            const endTime = nextBeat ? nextBeat.time : duration;
-            return time >= beat.time && time < endTime;
-          });
-          
-          if (beatIndex !== -1 && beatIndex !== currentPreviewBeat) {
-            setCurrentPreviewBeat(beatIndex);
-            updateVideoPreview(beatIndex);
-          }
-        }
       };
       
       const handleLoadedMetadata = () => {
@@ -116,7 +102,7 @@ export default function EditPage() {
         audioRef.current?.removeEventListener('loadedmetadata', handleLoadedMetadata);
       };
     }
-  }, [audioUrl, beats, isPlaying, currentPreviewBeat, duration]);
+  }, [audioUrl]);
 
   // Update video preview based on current beat
   const updateVideoPreview = (beatIndex: number) => {
@@ -289,7 +275,7 @@ export default function EditPage() {
 
     setIsExporting(true);
     setExportProgress(0);
-    setExportMessage('Preparing your masterpiece...');
+    setExportMessage('Processing your video...');
 
     try {
       const videosForProcessing = beats.map(beat => ({
@@ -300,90 +286,30 @@ export default function EditPage() {
 
       const beatMarkers = [0, ...beats.map(beat => beat.time)];
       
-      // Map quality to FFmpeg settings - using 'balanced' as default
-      const qualityMap = {
-        '720p': 'fast',
-        '1080p': 'balanced',
-        '4K': 'high'
-      };
-
-      // More realistic progress simulation
-      let progressInterval: NodeJS.Timeout;
-      let currentProgress = 0;
-      let progressSpeed = 0.5; // Start slow
-      
-      progressInterval = setInterval(() => {
-        if (currentProgress < 98) {
-          // Vary the speed based on progress stage
-          if (currentProgress < 20) {
-            progressSpeed = 1.2; // Faster at start (uploading)
-          } else if (currentProgress < 40) {
-            progressSpeed = 0.8; // Medium speed
-          } else if (currentProgress < 70) {
-            progressSpeed = 0.6; // Slower during processing
-          } else if (currentProgress < 85) {
-            progressSpeed = 0.4; // Even slower
-          } else {
-            progressSpeed = 0.2; // Very slow near the end
-          }
-          
-          currentProgress += Math.random() * progressSpeed + 0.1;
-          currentProgress = Math.min(currentProgress, 98); // Cap at 98%
-          setExportProgress(Math.round(currentProgress));
-          
-          // Update messages based on progress
-          if (currentProgress < 15) {
-            setExportMessage('Uploading files to the cloud...');
-          } else if (currentProgress < 30) {
-            setExportMessage('Analyzing beat patterns...');
-          } else if (currentProgress < 45) {
-            setExportMessage('Synchronizing video clips...');
-          } else if (currentProgress < 60) {
-            setExportMessage('Applying smooth transitions...');
-          } else if (currentProgress < 75) {
-            setExportMessage('Processing audio tracks...');
-          } else if (currentProgress < 85) {
-            setExportMessage('Optimizing video quality...');
-          } else if (currentProgress < 95) {
-            setExportMessage('Finalizing your video...');
-          } else {
-            setExportMessage('Almost done...');
-          }
-        }
-      }, 200); // Update every 200ms for smoother progress
-
+      // Simplified: Always use balanced quality (good for most cases)
       const outputUrl = await processVideoWithBeatsDirect(
         videosForProcessing,
         beatMarkers,
         audioFileRef.current,
         `Rhythm Cut Export - ${new Date().toISOString()}`,
-        qualityMap[exportQuality] as 'fast' | 'balanced' | 'high',
+        'balanced', // Fixed quality for stability
         (progress) => {
-          // Only update if actual progress is significantly ahead
-          const realProgress = Math.round(progress * 100);
-          // Scale real progress to leave room for finalization
-          const scaledProgress = Math.round(realProgress * 0.95); // Max 95% from real progress
+          // Simple linear progress
+          setExportProgress(Math.round(progress * 100));
           
-          if (scaledProgress > currentProgress + 5) {
-            // Jump ahead if real progress is significantly ahead
-            currentProgress = scaledProgress;
-            setExportProgress(scaledProgress);
+          // Simple progress messages
+          if (progress < 0.2) {
+            setExportMessage('Uploading files...');
+          } else if (progress < 0.8) {
+            setExportMessage('Processing video...');
+          } else {
+            setExportMessage('Finalizing...');
           }
         }
       );
 
-      // Clear interval and complete the progress
-      clearInterval(progressInterval);
-      
-      // Smooth completion from current to 100%
-      const finalProgress = currentProgress;
-      for (let i = finalProgress; i <= 100; i++) {
-        await new Promise(resolve => setTimeout(resolve, 20));
-        setExportProgress(i);
-        if (i === 100) {
-          setExportMessage('Export complete!');
-        }
-      }
+      setExportProgress(100);
+      setExportMessage('Export complete!');
 
       // Trigger download
       const downloadLink = document.createElement('a');
@@ -405,7 +331,7 @@ export default function EditPage() {
     }
   };
 
-  // Play/Pause Handler
+  // Play/Pause Handler - simplified
   const togglePlayback = () => {
     if (!audioRef.current || beats.some(beat => !beat.videoClip)) {
       toast.error('Please add all video clips before preview');
@@ -416,10 +342,11 @@ export default function EditPage() {
       audioRef.current.pause();
       previewVideoRef.current?.pause();
     } else {
-      // Start from current beat
-      updateVideoPreview(currentPreviewBeat);
       audioRef.current.play();
-      previewVideoRef.current?.play();
+      // Just play the preview video if it exists
+      if (previewVideoRef.current && previewVideoRef.current.src) {
+        previewVideoRef.current.play();
+      }
     }
     setIsPlaying(!isPlaying);
   };
@@ -625,12 +552,7 @@ export default function EditPage() {
                     />
                   </label>
 
-                  <button
-                    onClick={() => setShowSettings(!showSettings)}
-                    className="p-1.5 rounded-lg bg-gray-800/50 hover:bg-gray-700/50 transition-colors"
-                  >
-                    <Settings className="w-4 h-4" />
-                  </button>
+                  {/* Removed settings button - no longer needed */}
                   
                   <button
                     onClick={handleExport}
@@ -832,36 +754,7 @@ export default function EditPage() {
               </div>
             </div>
 
-            {/* Settings Panel */}
-            <AnimatePresence>
-              {showSettings && (
-                <motion.div
-                  initial={{ x: 300, opacity: 0 }}
-                  animate={{ x: 0, opacity: 1 }}
-                  exit={{ x: 300, opacity: 0 }}
-                  className="absolute right-0 top-14 h-[calc(100%-3.5rem)] w-72 bg-gray-900/95 backdrop-blur-xl border-l border-gray-800/50 p-4"
-                >
-                  <h3 className="text-lg font-semibold mb-4">Export Settings</h3>
-                  
-                  <div className="space-y-4">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-400 mb-2">
-                        Export Quality
-                      </label>
-                      <select
-                        value={exportQuality}
-                        onChange={(e) => setExportQuality(e.target.value as '720p' | '1080p' | '4K')}
-                        className="w-full px-3 py-2 bg-gray-800/50 border border-gray-700 rounded-lg text-sm focus:outline-none focus:border-purple-500 transition-colors"
-                      >
-                        <option value="720p">720p (Fast)</option>
-                        <option value="1080p">1080p (Balanced)</option>
-                        <option value="4K">4K (High Quality)</option>
-                      </select>
-                    </div>
-                  </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
+            {/* Removed settings panel - no longer needed */}
 
             {/* Filmstrip Editor Modal */}
             {editingBeatIndex !== null && beats[editingBeatIndex]?.videoClip && (
