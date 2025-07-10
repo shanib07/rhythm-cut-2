@@ -1,13 +1,13 @@
 'use client';
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Upload, Loader2, Play, Pause, Download, Edit2, Plus, FileAudio, Sparkles, Film, ChevronLeft, ChevronRight, Check, Info, Music, Video } from 'lucide-react';
+import { Upload, Play, Pause, Download, Edit2, Plus, FileAudio, Sparkles, Film, ChevronLeft, ChevronRight, Check, Info, Music, Video, ChevronDown } from 'lucide-react';
 import { AudioAnalyzer } from '@/src/services/AudioAnalyzer';
 import { toast } from 'sonner';
 import { useVideoStore } from '@/src/stores/videoStore';
 import { generateUniqueId } from '@/src/utils/videoUtils';
-import { processVideoWithBeatsDirect } from '@/src/utils/ffmpeg';
+import { processVideoWithBeatsDirect, processVideoWithBeats } from '@/src/utils/ffmpeg';
 import { FilmstripEditor } from '@/src/components/FilmstripEditor';
 
 interface Beat {
@@ -33,7 +33,8 @@ export default function EditPage() {
   const [isExporting, setIsExporting] = useState(false);
   const [exportProgress, setExportProgress] = useState(0);
   const [exportMessage, setExportMessage] = useState('');
-  // Removed export quality state - always use balanced quality
+  const [exportQuality, setExportQuality] = useState<'fast' | 'balanced' | 'high'>('balanced');
+  const [showExportOptions, setShowExportOptions] = useState(false);
   const [hoveredBeatIndex, setHoveredBeatIndex] = useState<number | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
@@ -52,6 +53,7 @@ export default function EditPage() {
   const videoForAudioInputRef = useRef<HTMLInputElement>(null);
   const videoFileInputRef = useRef<HTMLInputElement>(null);
   const previewVideoRef = useRef<HTMLVideoElement>(null);
+  const nextVideoRef = useRef<HTMLVideoElement>(null); // Preload next video
   const timelineRef = useRef<HTMLDivElement>(null);
 
   // Video Store
@@ -59,9 +61,7 @@ export default function EditPage() {
     setAudioFile,
     setAudioUrl,
     setAudioBuffer,
-    audioFile,
-    audioUrl,
-    audioBuffer
+    audioUrl
   } = useVideoStore();
 
   // Initialize Audio Analyzer
@@ -82,12 +82,70 @@ export default function EditPage() {
     };
   }, []);
 
-  // Audio time update handler - simplified
+  // Update video preview based on current beat with smooth transitions
+  const updateVideoPreview = useCallback((beatIndex: number) => {
+    if (!previewVideoRef.current || !beats[beatIndex]?.videoClip) return;
+    
+    const beat = beats[beatIndex];
+    const video = previewVideoRef.current;
+    
+    // Only update if video source changed
+    if (beat.videoClip && video.src !== beat.videoClip.url) {
+      // Store playing state
+      const wasPlaying = !video.paused;
+      
+      // Calculate the time offset within this beat
+      const beatStartTime = beat.time;
+      const currentAudioTime = audioRef.current?.currentTime || 0;
+      const timeIntoBeat = Math.max(0, currentAudioTime - beatStartTime);
+      
+      // Update video source
+      video.src = beat.videoClip.url;
+      
+      // Set video time based on beat configuration and audio sync
+      const videoStartTime = (beat.videoClip.startTime || 0) + timeIntoBeat;
+      
+      // Ensure we don't exceed video duration
+      video.onloadedmetadata = () => {
+        const clampedTime = Math.min(videoStartTime, video.duration - 0.1);
+        video.currentTime = clampedTime;
+        
+        // Resume playing if it was playing
+        if (wasPlaying && isPlaying) {
+          video.play().catch(err => {
+            console.warn('Video play failed:', err);
+          });
+        }
+      };
+    }
+  }, [beats, isPlaying]);
+
+  // Audio time update handler with beat synchronization
   useEffect(() => {
     if (audioRef.current) {
       const handleTimeUpdate = () => {
         const time = audioRef.current!.currentTime;
         setCurrentTime(time);
+        
+        // Find which beat should be playing based on current time
+        if (isPlaying && beats.length > 0) {
+          let beatIndex = 0;
+          
+          // Find the current beat based on audio time
+          for (let i = 0; i < beats.length; i++) {
+            if (time >= beats[i].time) {
+              beatIndex = i;
+            } else {
+              break;
+            }
+          }
+          
+          // Update preview if beat changed
+          if (beatIndex !== currentPreviewBeat) {
+            setCurrentPreviewBeat(beatIndex);
+            updateVideoPreview(beatIndex);
+          }
+        }
       };
       
       const handleLoadedMetadata = () => {
@@ -102,21 +160,22 @@ export default function EditPage() {
         audioRef.current?.removeEventListener('loadedmetadata', handleLoadedMetadata);
       };
     }
-  }, [audioUrl]);
+  }, [audioUrl, isPlaying, beats, currentPreviewBeat, updateVideoPreview]);
 
-  // Update video preview based on current beat
-  const updateVideoPreview = (beatIndex: number) => {
-    if (!previewVideoRef.current || !beats[beatIndex]?.videoClip) return;
+  // Preload next video for smooth transitions
+  useEffect(() => {
+    if (!isPlaying || !beats.length || currentPreviewBeat >= beats.length - 1) return;
     
-    const beat = beats[beatIndex];
-    if (beat.videoClip && previewVideoRef.current.src !== beat.videoClip.url) {
-      previewVideoRef.current.src = beat.videoClip.url;
-      previewVideoRef.current.currentTime = beat.videoClip.startTime || 0;
-      if (isPlaying) {
-        previewVideoRef.current.play().catch(console.error);
-      }
+    const nextBeat = beats[currentPreviewBeat + 1];
+    if (!nextBeat?.videoClip || !nextVideoRef.current) return;
+    
+    // Preload next video
+    const nextVideo = nextVideoRef.current;
+    if (nextVideo.src !== nextBeat.videoClip.url) {
+      nextVideo.src = nextBeat.videoClip.url;
+      nextVideo.load();
     }
-  };
+  }, [currentPreviewBeat, beats, isPlaying]);
 
   // Process audio from source
   const processAudioFromSource = async (file: File, isVideo: boolean = false) => {
@@ -286,27 +345,49 @@ export default function EditPage() {
 
       const beatMarkers = [0, ...beats.map(beat => beat.time)];
       
-      // Simplified: Always use balanced quality (good for most cases)
-      const outputUrl = await processVideoWithBeatsDirect(
-        videosForProcessing,
-        beatMarkers,
-        audioFileRef.current,
-        `Rhythm Cut Export - ${new Date().toISOString()}`,
-        'balanced', // Fixed quality for stability
-        (progress) => {
-          // Simple linear progress
-          setExportProgress(Math.round(progress * 100));
-          
-          // Simple progress messages
-          if (progress < 0.2) {
-            setExportMessage('Uploading files...');
-          } else if (progress < 0.8) {
-            setExportMessage('Processing video...');
-          } else {
-            setExportMessage('Finalizing...');
+      // Use queue-based processing for high quality, direct for fast/balanced
+      const useQueue = exportQuality === 'high';
+      let outputUrl: string;
+      
+      if (useQueue) {
+        // Queue-based processing for better reliability
+        outputUrl = await processVideoWithBeats(
+          videosForProcessing,
+          beatMarkers,
+          `Rhythm Cut Export - ${new Date().toISOString()}`,
+          (progress) => {
+            setExportProgress(Math.round(progress * 100));
+            
+            if (progress < 0.2) {
+              setExportMessage('Uploading files...');
+            } else if (progress < 0.8) {
+              setExportMessage('Processing video (high quality)...');
+            } else {
+              setExportMessage('Finalizing...');
+            }
           }
-        }
-      );
+        );
+      } else {
+        // Direct processing for faster results
+        outputUrl = await processVideoWithBeatsDirect(
+          videosForProcessing,
+          beatMarkers,
+          audioFileRef.current,
+          `Rhythm Cut Export - ${new Date().toISOString()}`,
+          exportQuality,
+          (progress) => {
+            setExportProgress(Math.round(progress * 100));
+            
+            if (progress < 0.2) {
+              setExportMessage('Uploading files...');
+            } else if (progress < 0.8) {
+              setExportMessage(`Processing video (${exportQuality} mode)...`);
+            } else {
+              setExportMessage('Finalizing...');
+            }
+          }
+        );
+      }
 
       setExportProgress(100);
       setExportMessage('Export complete!');
@@ -325,30 +406,77 @@ export default function EditPage() {
       }, 500);
     } catch (error) {
       console.error('Export error:', error);
-      toast.error('Failed to export video');
+      
+      // Provide more helpful error messages
+      if (error instanceof Error) {
+        if (error.message.includes('timeout')) {
+          toast.error('Export timed out. Try using "Fast Export" for quicker results.');
+        } else if (error.message.includes('upload')) {
+          toast.error('Failed to upload files. Please check your connection and try again.');
+        } else if (error.message.includes('processing')) {
+          toast.error('Video processing failed. Try reducing the number of clips or using lower quality.');
+        } else {
+          toast.error(`Export failed: ${error.message}`);
+        }
+      } else {
+        toast.error('Failed to export video. Please try again.');
+      }
     } finally {
       setIsExporting(false);
     }
   };
 
-  // Play/Pause Handler - simplified
-  const togglePlayback = () => {
+  // Play/Pause Handler with proper synchronization
+  const togglePlayback = async () => {
     if (!audioRef.current || beats.some(beat => !beat.videoClip)) {
       toast.error('Please add all video clips before preview');
       return;
     }
     
     if (isPlaying) {
+      // Pause both audio and video
       audioRef.current.pause();
       previewVideoRef.current?.pause();
+      setIsPlaying(false);
     } else {
-      audioRef.current.play();
-      // Just play the preview video if it exists
-      if (previewVideoRef.current && previewVideoRef.current.src) {
-        previewVideoRef.current.play();
+      try {
+        // Find current beat and update preview first
+        const currentAudioTime = audioRef.current.currentTime;
+        let beatIndex = 0;
+        
+        for (let i = 0; i < beats.length; i++) {
+          if (currentAudioTime >= beats[i].time) {
+            beatIndex = i;
+          } else {
+            break;
+          }
+        }
+        
+        // Update preview to correct beat
+        if (beatIndex !== currentPreviewBeat) {
+          setCurrentPreviewBeat(beatIndex);
+          updateVideoPreview(beatIndex);
+        }
+        
+        // Start audio playback
+        await audioRef.current.play();
+        
+        // Start video playback with slight delay to ensure sync
+        setTimeout(() => {
+          if (previewVideoRef.current && previewVideoRef.current.src) {
+            previewVideoRef.current.play().catch(err => {
+              console.warn('Video autoplay failed:', err);
+            });
+          }
+        }, 50);
+        
+        setIsPlaying(true);
+      } catch (err) {
+        console.error('Playback error:', err);
+        toast.error('Failed to start playback');
+        setIsPlaying(false);
       }
     }
-    setIsPlaying(!isPlaying);
   };
 
   // Timeline navigation
@@ -359,6 +487,35 @@ export default function EditPage() {
       left: direction === 'left' ? -scrollAmount : scrollAmount,
       behavior: 'smooth'
     });
+  };
+
+  // Seek to specific time
+  const handleSeek = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!audioRef.current || !duration) return;
+    
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const percentage = x / rect.width;
+    const newTime = percentage * duration;
+    
+    // Update audio time
+    audioRef.current.currentTime = newTime;
+    setCurrentTime(newTime);
+    
+    // Find and update beat
+    let beatIndex = 0;
+    for (let i = 0; i < beats.length; i++) {
+      if (newTime >= beats[i].time) {
+        beatIndex = i;
+      } else {
+        break;
+      }
+    }
+    
+    if (beatIndex !== currentPreviewBeat) {
+      setCurrentPreviewBeat(beatIndex);
+      updateVideoPreview(beatIndex);
+    }
   };
 
   // Format time helper
@@ -552,16 +709,61 @@ export default function EditPage() {
                     />
                   </label>
 
-                  {/* Removed settings button - no longer needed */}
-                  
-                  <button
-                    onClick={handleExport}
-                    disabled={beats.some(beat => !beat.videoClip) || isExporting}
-                    className="px-4 py-1.5 rounded-lg bg-gradient-to-r from-purple-500 to-blue-500 font-medium text-sm disabled:opacity-50 disabled:cursor-not-allowed hover:shadow-lg hover:shadow-purple-500/25 transition-all"
-                  >
-                    <Download className="w-4 h-4 inline mr-1.5" />
-                    Export
-                  </button>
+                  {/* Export with quality options */}
+                  <div className="relative">
+                    <button
+                      onClick={() => setShowExportOptions(!showExportOptions)}
+                      disabled={beats.some(beat => !beat.videoClip) || isExporting}
+                      className="px-4 py-1.5 rounded-lg bg-gradient-to-r from-purple-500 to-blue-500 font-medium text-sm disabled:opacity-50 disabled:cursor-not-allowed hover:shadow-lg hover:shadow-purple-500/25 transition-all flex items-center gap-1.5"
+                    >
+                      <Download className="w-4 h-4" />
+                      Export
+                      <ChevronDown className={`w-3 h-3 transition-transform ${showExportOptions ? 'rotate-180' : ''}`} />
+                    </button>
+                    
+                    {/* Export quality dropdown */}
+                    {showExportOptions && !isExporting && (
+                      <div className="absolute right-0 mt-1 w-48 bg-gray-800 border border-gray-700 rounded-lg shadow-xl z-10">
+                        <div className="p-2">
+                          <button
+                            onClick={() => {
+                              setExportQuality('fast');
+                              setShowExportOptions(false);
+                              handleExport();
+                            }}
+                            className="w-full text-left px-3 py-2 rounded hover:bg-gray-700 transition-colors"
+                          >
+                            <div className="font-medium text-sm">Fast Export</div>
+                            <div className="text-xs text-gray-400">Lower quality, quick preview</div>
+                          </button>
+                          
+                          <button
+                            onClick={() => {
+                              setExportQuality('balanced');
+                              setShowExportOptions(false);
+                              handleExport();
+                            }}
+                            className="w-full text-left px-3 py-2 rounded hover:bg-gray-700 transition-colors"
+                          >
+                            <div className="font-medium text-sm">Balanced Export</div>
+                            <div className="text-xs text-gray-400">Good quality, moderate speed</div>
+                          </button>
+                          
+                          <button
+                            onClick={() => {
+                              setExportQuality('high');
+                              setShowExportOptions(false);
+                              handleExport();
+                            }}
+                            className="w-full text-left px-3 py-2 rounded hover:bg-gray-700 transition-colors"
+                          >
+                            <div className="font-medium text-sm">High Quality</div>
+                            <div className="text-xs text-gray-400">Best quality, slower processing</div>
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
             </div>
@@ -583,12 +785,21 @@ export default function EditPage() {
                 <div className="absolute inset-0 bg-gradient-to-br from-purple-500/10 via-transparent to-blue-500/10 rounded-xl" />
                 <div className="relative h-full bg-gray-900/50 backdrop-blur-xl border border-gray-800/50 rounded-xl overflow-hidden">
                   {beats[0]?.videoClip ? (
-                    <video
-                      ref={previewVideoRef}
-                      className="w-full h-full object-contain"
-                      controls={false}
-                      muted
-                    />
+                    <>
+                      <video
+                        ref={previewVideoRef}
+                        className="w-full h-full object-contain"
+                        controls={false}
+                        muted
+                      />
+                      {/* Hidden video for preloading next clip */}
+                      <video
+                        ref={nextVideoRef}
+                        className="hidden"
+                        muted
+                        preload="auto"
+                      />
+                    </>
                   ) : (
                     <div className="flex items-center justify-center h-full">
                       <div className="text-center">
@@ -613,11 +824,23 @@ export default function EditPage() {
                     </button>
 
                         <div className="flex-1">
-                          <div className="h-1 bg-white/20 rounded-full">
+                          <div 
+                            className="h-1 bg-white/20 rounded-full cursor-pointer relative group"
+                            onClick={handleSeek}
+                          >
                             <div 
-                              className="h-full bg-gradient-to-r from-purple-500 to-blue-500 rounded-full transition-all" 
+                              className="h-full bg-gradient-to-r from-purple-500 to-blue-500 rounded-full transition-all pointer-events-none" 
                               style={{ width: `${duration > 0 ? (currentTime / duration) * 100 : 0}%` }} 
                             />
+                            {/* Beat markers */}
+                            {beats.map((beat, index) => (
+                              <div
+                                key={beat.id}
+                                className="absolute top-1/2 -translate-y-1/2 w-0.5 h-2 bg-white/30 pointer-events-none"
+                                style={{ left: `${(beat.time / duration) * 100}%` }}
+                                title={`Beat ${index + 1}`}
+                              />
+                            ))}
                           </div>
                         </div>
                         

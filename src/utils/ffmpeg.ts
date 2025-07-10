@@ -534,26 +534,34 @@ export const processVideoWithBeatsDirect = async (
       throw new Error('Audio file is required');
     }
 
-    // Upload all video files first (0-20%)
-    console.log('🚀 DIRECT: Uploading videos...');
+    // Upload all video files in parallel (0-20%)
+    console.log('🚀 DIRECT: Uploading videos in parallel...');
     onProgress?.(0.05);
-    const uploadedVideos = [];
     
-    for (let i = 0; i < videos.length; i++) {
-      const video = videos[i];
-      console.log(`🚀 DIRECT: Uploading video ${i + 1}/${videos.length}`);
+    const uploadPromises = videos.map(async (video, index) => {
+      console.log(`🚀 DIRECT: Starting upload for video ${index + 1}/${videos.length}`);
       
-      const serverUrl = await uploadVideoFile(video.file);
-      const metadata = await getVideoMetadata(video.file);
-      
-      uploadedVideos.push({
-        id: video.id,
-        url: serverUrl,
-        duration: metadata.duration
-      });
-      
-      onProgress?.(0.05 + (i + 1) / videos.length * 0.15); // 5-20%
-    }
+      try {
+        const [serverUrl, metadata] = await Promise.all([
+          uploadVideoFile(video.file),
+          getVideoMetadata(video.file)
+        ]);
+        
+        console.log(`🚀 DIRECT: Video ${index + 1} uploaded successfully`);
+        
+        return {
+          id: video.id,
+          url: serverUrl,
+          duration: metadata.duration
+        };
+      } catch (error) {
+        console.error(`🚀 DIRECT: Upload failed for video ${index + 1}:`, error);
+        throw new Error(`Failed to upload video ${index + 1}: ${video.file.name}`);
+      }
+    });
+    
+    const uploadedVideos = await Promise.all(uploadPromises);
+    onProgress?.(0.20); // 20% when all uploads complete
 
     // Upload audio file (20-25%)
     console.log('🚀 DIRECT: Uploading audio file...');
