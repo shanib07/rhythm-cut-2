@@ -8,6 +8,7 @@ import { toast } from 'sonner';
 import { useVideoStore } from '@/src/stores/videoStore';
 import { generateUniqueId } from '@/src/utils/videoUtils';
 import { processVideoWithBeatsDirect, processVideoWithBeats } from '@/src/utils/ffmpeg';
+import { hybridVideoExport, getAvailableExportMethods, EXPORT_METHODS } from '@/src/utils/hybridExport';
 import { FilmstripEditor } from '@/src/components/FilmstripEditor';
 
 interface Beat {
@@ -44,6 +45,14 @@ export default function EditPage() {
   const [videoDurations, setVideoDurations] = useState<Record<string, number>>({});
   const [currentPreviewBeat, setCurrentPreviewBeat] = useState<number>(0);
   const [showAudioOptions, setShowAudioOptions] = useState(false);
+  const [videoLoadingProgress, setVideoLoadingProgress] = useState<Record<string, number>>({});
+  const [previewLoadingState, setPreviewLoadingState] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
+  const [exportCapabilities, setExportCapabilities] = useState({
+    webCodecs: false,
+    webAssembly: false,
+    serverProcessing: true,
+    mediaRecorder: false
+  });
 
   // Refs
   const audioFileRef = useRef<File | null>(null);
@@ -64,7 +73,7 @@ export default function EditPage() {
     audioUrl
   } = useVideoStore();
 
-  // Initialize Audio Analyzer
+  // Initialize Audio Analyzer and detect export capabilities
   useEffect(() => {
     analyzerRef.current = new AudioAnalyzer({
       fftSize: 2048,
@@ -76,6 +85,9 @@ export default function EditPage() {
     if (analyzerRef.current && typeof analyzerRef.current.setAlgorithm === 'function') {
       analyzerRef.current.setAlgorithm('onset');
     }
+
+    // Detect export capabilities on client side
+    setExportCapabilities(getAvailableExportMethods());
 
     return () => {
       analyzerRef.current?.dispose();
@@ -318,14 +330,92 @@ export default function EditPage() {
     if (allBeatsHaveVideos) {
       toast.success('All beats have video clips assigned! You can now preview or export.');
       
-      // Set first video as preview
-      if (newBeats[0]?.videoClip && previewVideoRef.current) {
-        previewVideoRef.current.src = newBeats[0].videoClip.url;
-      }
+      // Start intelligent preview loading
+      startPreviewLoading(newBeats);
     }
   };
 
-  // Export Handler with fixed progress
+  // Intelligent Preview Loading System
+  const startPreviewLoading = async (beatsToLoad: Beat[]) => {
+    setPreviewLoadingState('loading');
+    console.log('🎬 Starting intelligent preview loading...');
+    
+    try {
+      // Load videos in priority order: current, next, previous, then rest
+      const loadingPromises = beatsToLoad.map(async (beat, index) => {
+        if (!beat.videoClip) return;
+        
+        const priority = index === 0 ? 0 : index === 1 ? 1 : 100 + index;
+        
+        return new Promise<void>((resolve) => {
+          setTimeout(async () => {
+            await preloadVideo(beat.videoClip!.url, beat.id);
+            resolve();
+          }, priority * 100); // Stagger loading based on priority
+        });
+      });
+
+      // Set first video immediately for instant preview
+      if (beatsToLoad[0]?.videoClip && previewVideoRef.current) {
+        previewVideoRef.current.src = beatsToLoad[0].videoClip.url;
+        console.log('🎬 First video set for immediate preview');
+      }
+
+      // Wait for priority videos to load
+      await Promise.all(loadingPromises.slice(0, 3));
+      setPreviewLoadingState('ready');
+      
+      // Continue loading remaining videos in background
+      if (loadingPromises.length > 3) {
+        Promise.all(loadingPromises.slice(3)).then(() => {
+          console.log('🎬 All videos preloaded');
+        });
+      }
+      
+    } catch (error) {
+      console.error('Preview loading failed:', error);
+      setPreviewLoadingState('error');
+      toast.error('Some videos failed to load for preview');
+    }
+  };
+
+  // Preload individual video with progress tracking
+  const preloadVideo = async (url: string, beatId: string): Promise<void> => {
+    return new Promise((resolve, reject) => {
+      const video = document.createElement('video');
+      video.preload = 'metadata';
+      video.muted = true;
+      
+      const updateProgress = () => {
+        if (video.duration) {
+          const progress = (video.buffered.length > 0 ? video.buffered.end(0) / video.duration : 0) * 100;
+          setVideoLoadingProgress(prev => ({ ...prev, [beatId]: progress }));
+        }
+      };
+      
+      video.addEventListener('loadedmetadata', () => {
+        updateProgress();
+        console.log(`📹 Video metadata loaded: ${url.split('/').pop()}`);
+      });
+      
+      video.addEventListener('canplaythrough', () => {
+        setVideoLoadingProgress(prev => ({ ...prev, [beatId]: 100 }));
+        console.log(`✅ Video ready: ${url.split('/').pop()}`);
+        resolve();
+      });
+      
+      video.addEventListener('progress', updateProgress);
+      
+      video.addEventListener('error', (e) => {
+        console.error(`❌ Video load error: ${url}`, e);
+        reject(e);
+      });
+      
+      video.src = url;
+    });
+  };
+
+  // Enhanced Export Handler with Hybrid Processing
   const handleExport = async () => {
     if (!audioFileRef.current || beats.some(beat => !beat.videoClip)) {
       toast.error('Please ensure all beats have video clips assigned');
@@ -334,7 +424,11 @@ export default function EditPage() {
 
     setIsExporting(true);
     setExportProgress(0);
-    setExportMessage('Processing your video...');
+    
+    // Show export method being used
+    const method = exportCapabilities.webCodecs && exportQuality === 'fast' ? 'WebCodecs' : 
+                   exportCapabilities.mediaRecorder && beats.length <= 5 ? 'Canvas' : 'Server';
+    setExportMessage(`Starting ${method} export...`);
 
     try {
       const videosForProcessing = beats.map(beat => ({
@@ -345,48 +439,71 @@ export default function EditPage() {
 
       const beatMarkers = [0, ...beats.map(beat => beat.time)];
       
-      // Use queue-based processing for high quality, direct for fast/balanced
-      const useQueue = exportQuality === 'high';
+      // Try hybrid export system first (much faster for supported browsers)
       let outputUrl: string;
       
-      if (useQueue) {
-        // Queue-based processing for better reliability
-        outputUrl = await processVideoWithBeats(
-          videosForProcessing,
-          beatMarkers,
-          `Rhythm Cut Export - ${new Date().toISOString()}`,
-          (progress) => {
-            setExportProgress(Math.round(progress * 100));
-            
-            if (progress < 0.2) {
-              setExportMessage('Uploading files...');
-            } else if (progress < 0.8) {
-              setExportMessage('Processing video (high quality)...');
-            } else {
-              setExportMessage('Finalizing...');
-            }
-          }
-        );
-      } else {
-        // Direct processing for faster results
-        outputUrl = await processVideoWithBeatsDirect(
+      try {
+        console.log('🚀 Attempting hybrid export...');
+        outputUrl = await hybridVideoExport(
           videosForProcessing,
           beatMarkers,
           audioFileRef.current,
-          `Rhythm Cut Export - ${new Date().toISOString()}`,
-          exportQuality,
-          (progress) => {
-            setExportProgress(Math.round(progress * 100));
-            
-            if (progress < 0.2) {
-              setExportMessage('Uploading files...');
-            } else if (progress < 0.8) {
-              setExportMessage(`Processing video (${exportQuality} mode)...`);
-            } else {
-              setExportMessage('Finalizing...');
+          {
+            quality: exportQuality,
+            onProgress: (progress, message) => {
+              setExportProgress(Math.round(progress));
+              setExportMessage(message);
             }
           }
         );
+        
+        toast.success(`Export completed using ${method} processing!`);
+        
+      } catch (hybridError) {
+        console.warn('Hybrid export failed, falling back to server:', hybridError);
+        
+        // Fallback to original server processing
+        setExportMessage('Falling back to server processing...');
+        
+        const useQueue = exportQuality === 'high';
+        
+        if (useQueue) {
+          outputUrl = await processVideoWithBeats(
+            videosForProcessing,
+            beatMarkers,
+            `Rhythm Cut Export - ${new Date().toISOString()}`,
+            (progress) => {
+              setExportProgress(Math.round(progress * 100));
+              
+              if (progress < 0.2) {
+                setExportMessage('Uploading files...');
+              } else if (progress < 0.8) {
+                setExportMessage('Processing video (server)...');
+              } else {
+                setExportMessage('Finalizing...');
+              }
+            }
+          );
+        } else {
+          outputUrl = await processVideoWithBeatsDirect(
+            videosForProcessing,
+            beatMarkers,
+            audioFileRef.current,
+            `Rhythm Cut Export - ${new Date().toISOString()}`,
+            exportQuality,
+            (progress) => {
+              setExportProgress(Math.round(progress * 100));
+              
+              if (progress < 0.2) {
+                setExportMessage('Uploading files...');
+              } else if (progress < 0.8) {
+                setExportMessage(`Processing video (${exportQuality} mode)...`);
+              } else {
+                setExportMessage('Finalizing...');
+              }
+            }
+          );
+        }
       }
 
       setExportProgress(100);
@@ -723,7 +840,7 @@ export default function EditPage() {
                     
                     {/* Export quality dropdown */}
                     {showExportOptions && !isExporting && (
-                      <div className="absolute right-0 mt-1 w-48 bg-gray-800 border border-gray-700 rounded-lg shadow-xl z-10">
+                      <div className="absolute right-0 top-full mt-1 w-48 bg-gray-800 border border-gray-700 rounded-lg shadow-xl z-50">
                         <div className="p-2">
                           <button
                             onClick={() => {
@@ -733,8 +850,17 @@ export default function EditPage() {
                             }}
                             className="w-full text-left px-3 py-2 rounded hover:bg-gray-700 transition-colors"
                           >
-                            <div className="font-medium text-sm">Fast Export</div>
-                            <div className="text-xs text-gray-400">Lower quality, quick preview</div>
+                            <div className="font-medium text-sm flex items-center gap-2">
+                              Fast Export
+                              {exportCapabilities.webCodecs && (
+                                <span className="text-xs bg-green-500/20 text-green-400 px-1.5 py-0.5 rounded">
+                                  WebCodecs
+                                </span>
+                              )}
+                            </div>
+                            <div className="text-xs text-gray-400">
+                              {exportCapabilities.webCodecs ? 'Ultra-fast browser processing' : 'Lower quality, quick preview'}
+                            </div>
                           </button>
                           
                           <button
@@ -745,8 +871,17 @@ export default function EditPage() {
                             }}
                             className="w-full text-left px-3 py-2 rounded hover:bg-gray-700 transition-colors"
                           >
-                            <div className="font-medium text-sm">Balanced Export</div>
-                            <div className="text-xs text-gray-400">Good quality, moderate speed</div>
+                            <div className="font-medium text-sm flex items-center gap-2">
+                              Balanced Export
+                              {exportCapabilities.mediaRecorder && beats.length <= 5 && (
+                                <span className="text-xs bg-blue-500/20 text-blue-400 px-1.5 py-0.5 rounded">
+                                  Canvas
+                                </span>
+                              )}
+                            </div>
+                            <div className="text-xs text-gray-400">
+                              {exportCapabilities.mediaRecorder && beats.length <= 5 ? 'Fast canvas rendering' : 'Good quality, moderate speed'}
+                            </div>
                           </button>
                           
                           <button
@@ -799,6 +934,17 @@ export default function EditPage() {
                         muted
                         preload="auto"
                       />
+                      
+                      {/* Preview Loading Overlay */}
+                      {previewLoadingState === 'loading' && (
+                        <div className="absolute inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center">
+                          <div className="text-center">
+                            <div className="w-16 h-16 border-4 border-purple-500/30 border-t-purple-500 rounded-full animate-spin mx-auto mb-4"></div>
+                            <p className="text-white font-medium">Loading preview videos...</p>
+                            <p className="text-gray-400 text-sm mt-1">Optimizing for smooth playback</p>
+                          </div>
+                        </div>
+                      )}
                     </>
                   ) : (
                     <div className="flex items-center justify-center h-full">

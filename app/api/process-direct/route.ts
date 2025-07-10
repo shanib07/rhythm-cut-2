@@ -47,22 +47,41 @@ export async function POST(req: NextRequest) {
       quality
     });
 
-    // Simple, stable quality settings
+    // Optimized quality settings for maximum performance
     const qualitySettings = {
       fast: { 
-        preset: 'veryfast',
-        crf: '23',
-        resolution: '1280x720'
+        preset: 'ultrafast',
+        crf: '28',
+        resolution: '854x480',
+        extraOptions: [
+          '-tune', 'zerolatency',
+          '-movflags', '+faststart',
+          '-threads', '0',
+          '-x264-params', 'no-scenecut:nal-hrd=cbr',
+          '-profile:v', 'baseline',
+          '-level', '3.0'
+        ]
       },
       balanced: { 
-        preset: 'fast',
-        crf: '21',
-        resolution: '1280x720'
+        preset: 'superfast',
+        crf: '23',
+        resolution: '1280x720',
+        extraOptions: [
+          '-movflags', '+faststart',
+          '-threads', '0',
+          '-tune', 'film'
+        ]
       },
       high: { 
-        preset: 'slow',
-        crf: '18',
-        resolution: '1920x1080'
+        preset: 'fast',
+        crf: '20',
+        resolution: '1920x1080',
+        extraOptions: [
+          '-movflags', '+faststart',
+          '-threads', '0',
+          '-tune', 'film',
+          '-profile:v', 'high'
+        ]
       }
     };
 
@@ -129,7 +148,7 @@ export async function POST(req: NextRequest) {
           .outputOptions([
             '-preset', settings.preset,
             '-crf', settings.crf,
-            '-movflags', '+faststart',
+            ...settings.extraOptions,
             '-y'
           ])
           .output(segmentPath)
