@@ -840,7 +840,7 @@ export default function EditPage() {
                     
                     {/* Export quality dropdown */}
                     {showExportOptions && !isExporting && (
-                      <div className="absolute right-0 top-full mt-1 w-48 bg-gray-800 border border-gray-700 rounded-lg shadow-xl z-[999]">
+                      <div className="fixed right-[2rem] top-[4.5rem] w-48 bg-gray-800 border border-gray-700 rounded-lg shadow-xl z-[9999]">
                         <div className="p-2">
                           <button
                             onClick={() => {

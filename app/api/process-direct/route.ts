@@ -47,40 +47,48 @@ export async function POST(req: NextRequest) {
       quality
     });
 
-    // Optimized quality settings for maximum performance
+    // Highly optimized quality settings for maximum performance
     const qualitySettings = {
       fast: { 
         preset: 'ultrafast',
-        crf: '28',
+        crf: '30', // Higher CRF for smaller files and faster encoding
         resolution: '854x480',
         extraOptions: [
-          '-tune', 'zerolatency',
+          '-tune', 'fastdecode', // Optimize for fast decoding
           '-movflags', '+faststart',
           '-threads', '0',
-          '-x264-params', 'no-scenecut:nal-hrd=cbr',
+          '-x264-params', 'ref=1:bframes=0:cabac=0:8x8dct=0:weightp=0:me=dia:subme=0:rc-lookahead=0', // Disable complex features
           '-profile:v', 'baseline',
-          '-level', '3.0'
+          '-level', '3.0',
+          '-pix_fmt', 'yuv420p' // Ensure compatibility
         ]
       },
       balanced: { 
-        preset: 'superfast',
-        crf: '23',
+        preset: 'veryfast', // Faster than 'superfast' with good quality
+        crf: '24',
         resolution: '1280x720',
         extraOptions: [
           '-movflags', '+faststart',
           '-threads', '0',
-          '-tune', 'film'
+          '-tune', 'film',
+          '-x264-params', 'ref=2:bframes=2:rc-lookahead=20', // Balanced settings
+          '-profile:v', 'main',
+          '-pix_fmt', 'yuv420p'
         ]
       },
       high: { 
-        preset: 'fast',
-        crf: '20',
+        preset: 'medium', // Better quality than 'fast'
+        crf: '19', // Lower CRF for higher quality
         resolution: '1920x1080',
         extraOptions: [
           '-movflags', '+faststart',
           '-threads', '0',
           '-tune', 'film',
-          '-profile:v', 'high'
+          '-x264-params', 'ref=4:bframes=3:rc-lookahead=40:aq-mode=2', // High quality settings
+          '-profile:v', 'high',
+          '-level', '4.1',
+          '-pix_fmt', 'yuv420p',
+          '-bf', '3' // More B-frames for better compression
         ]
       }
     };
@@ -121,47 +129,75 @@ export async function POST(req: NextRequest) {
       segmentsCount: segments.length
     });
 
-    // Step 1: Process each segment with simple, stable approach
+    // Step 1: Process segments in parallel for massive speed improvement
     const segmentPaths: string[] = [];
+    const os = await import('os');
+    const BATCH_SIZE = Math.max(2, Math.min(os.cpus().length, 4)); // Use 2-4 parallel processes
     
+    console.log(`🚀 PROCESS: Using ${BATCH_SIZE} parallel workers for segment processing`);
+    
+    // Pre-allocate segment paths
     for (let i = 0; i < segments.length; i++) {
-      const segment = segments[i];
-      const segmentPath = path.join(tempDir, `segment_${i}.mp4`);
-      segmentPaths.push(segmentPath);
+      segmentPaths.push(path.join(tempDir, `segment_${i}.mp4`));
+    }
+    
+    // Process segments in parallel batches
+    for (let i = 0; i < segments.length; i += BATCH_SIZE) {
+      const batch = segments.slice(i, Math.min(i + BATCH_SIZE, segments.length));
+      const batchPromises = batch.map(async (segment, batchIndex) => {
+        const segmentIndex = i + batchIndex;
+        const segmentPath = segmentPaths[segmentIndex];
+        
+        // Convert URL to absolute path
+        let videoPath = segment.video.url;
+        if (videoPath.startsWith('/uploads/')) {
+          videoPath = path.join(process.cwd(), 'public', segment.video.url);
+        }
 
-      // Convert URL to absolute path
-      let videoPath = segment.video.url;
-      if (videoPath.startsWith('/uploads/')) {
-        videoPath = path.join(process.cwd(), 'public', segment.video.url);
-      }
+        console.log(`🎬 PROCESS: Starting segment ${segmentIndex + 1}/${segments.length}`);
 
-      console.log(`🎬 PROCESS: Cutting segment ${i + 1}/${segments.length}`);
-
-      // Simple, stable FFmpeg command
-      await new Promise<void>((resolve, reject) => {
-        ffmpeg(videoPath)
-          .setStartTime(segment.startTime)
-          .setDuration(segment.duration)
-          .videoCodec('libx264')
-          .audioCodec('aac')
-          .size(settings.resolution)
-          .outputOptions([
-            '-preset', settings.preset,
-            '-crf', settings.crf,
-            ...settings.extraOptions,
-            '-y'
-          ])
-          .output(segmentPath)
-          .on('end', () => {
-            console.log(`🎬 PROCESS: Segment ${i + 1} completed`);
-            resolve();
-          })
-          .on('error', (error) => {
-            console.error(`🎬 PROCESS: Segment ${i + 1} failed:`, error.message);
-            reject(error);
-          })
-          .run();
+        // Optimized FFmpeg command with multi-threading
+        return new Promise<void>((resolve, reject) => {
+          const ffmpegCommand = ffmpeg(videoPath)
+            .setStartTime(segment.startTime)
+            .setDuration(segment.duration);
+          
+          // For fast mode, try to avoid re-encoding when possible
+          if (quality === 'fast' && segment.duration < 3) {
+            ffmpegCommand
+              .videoCodec('copy')
+              .audioCodec('copy');
+          } else {
+            ffmpegCommand
+              .videoCodec('libx264')
+              .audioCodec('aac')
+              .size(settings.resolution)
+              .outputOptions([
+                '-preset', settings.preset,
+                '-crf', settings.crf,
+                ...settings.extraOptions,
+                '-threads', '2', // Limit threads per segment to avoid overload
+                '-y'
+              ]);
+          }
+          
+          ffmpegCommand
+            .output(segmentPath)
+            .on('end', () => {
+              console.log(`✅ PROCESS: Segment ${segmentIndex + 1} completed`);
+              resolve();
+            })
+            .on('error', (error) => {
+              console.error(`❌ PROCESS: Segment ${segmentIndex + 1} failed:`, error.message);
+              reject(error);
+            })
+            .run();
+        });
       });
+      
+      // Wait for batch to complete before starting next batch
+      await Promise.all(batchPromises);
+      console.log(`🎬 PROCESS: Batch ${Math.floor(i / BATCH_SIZE) + 1} completed`);
     }
 
     // Step 2: Concatenate segments (simple concat)
