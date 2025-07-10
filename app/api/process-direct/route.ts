@@ -141,6 +141,10 @@ export async function POST(req: NextRequest) {
       segmentPaths.push(path.join(tempDir, `segment_${i}.mp4`));
     }
     
+    // Track progress
+    let completedSegments = 0;
+    const totalSegments = segments.length;
+    
     // Process segments in parallel batches
     for (let i = 0; i < segments.length; i += BATCH_SIZE) {
       const batch = segments.slice(i, Math.min(i + BATCH_SIZE, segments.length));
@@ -183,8 +187,16 @@ export async function POST(req: NextRequest) {
           
           ffmpegCommand
             .output(segmentPath)
+            .on('progress', (progress) => {
+              // Log individual segment progress
+              const segmentProgress = progress.percent || 0;
+              const overallProgress = ((completedSegments + (segmentProgress / 100)) / totalSegments) * 60; // 0-60% for segments
+              console.log(`🎬 PROCESS: Segment ${segmentIndex + 1} progress: ${segmentProgress.toFixed(1)}% (Overall: ${overallProgress.toFixed(1)}%)`);
+            })
             .on('end', () => {
-              console.log(`✅ PROCESS: Segment ${segmentIndex + 1} completed`);
+              completedSegments++;
+              const overallProgress = (completedSegments / totalSegments) * 60; // 0-60% for segments
+              console.log(`✅ PROCESS: Segment ${segmentIndex + 1} completed (${completedSegments}/${totalSegments}, Overall: ${overallProgress.toFixed(1)}%)`);
               resolve();
             })
             .on('error', (error) => {
@@ -197,7 +209,7 @@ export async function POST(req: NextRequest) {
       
       // Wait for batch to complete before starting next batch
       await Promise.all(batchPromises);
-      console.log(`🎬 PROCESS: Batch ${Math.floor(i / BATCH_SIZE) + 1} completed`);
+      console.log(`🎬 PROCESS: Batch ${Math.floor(i / BATCH_SIZE) + 1} completed (${completedSegments}/${totalSegments} segments done)`);
     }
 
     // Step 2: Concatenate segments (simple concat)
@@ -276,13 +288,22 @@ export async function POST(req: NextRequest) {
     const processingTime = Date.now() - startTime;
     console.log('🎬 PROCESS: All processing completed', {
       outputUrl,
-      processingTimeMs: processingTime
+      processingTimeMs: processingTime,
+      segmentsProcessed: segments.length,
+      quality,
+      averageTimePerSegment: Math.round(processingTime / segments.length)
     });
 
     return NextResponse.json({
       success: true,
       outputUrl,
-      processingTime
+      processingTime,
+      details: {
+        segmentsProcessed: segments.length,
+        quality,
+        processingTimeMs: processingTime,
+        averageTimePerSegmentMs: Math.round(processingTime / segments.length)
+      }
     });
 
   } catch (error) {

@@ -575,7 +575,13 @@ export const processVideoWithBeatsDirect = async (
     // Call direct processing endpoint
     const startProcessingTime = Date.now();
     
-    const response = await fetch('/api/process-direct', {
+    // Estimate processing time based on video count and quality
+    const segmentCount = beatMarkers.length - 1;
+    const estimatedTimePerSegment = quality === 'fast' ? 1000 : quality === 'balanced' ? 2000 : 3000;
+    const estimatedTotalTime = segmentCount * estimatedTimePerSegment + 5000; // Add 5s for concat/audio
+    
+    // Create a promise for the fetch request
+    const fetchPromise = fetch('/api/process-direct', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
@@ -589,15 +595,71 @@ export const processVideoWithBeatsDirect = async (
       })
     });
 
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({ error: 'Processing failed' }));
-      throw new Error(`Direct processing failed: ${errorData.error || errorData.details || response.statusText}`);
+    // Create a promise for progress simulation
+    const progressPromise = new Promise<void>((resolve) => {
+      let progress = 0.30;
+      const progressInterval = setInterval(() => {
+        // Simulate progress from 30% to 85%
+        progress += (0.55 / (estimatedTotalTime / 1000)) * 2; // Update every 2 seconds
+        if (progress > 0.85) {
+          progress = 0.85;
+          clearInterval(progressInterval);
+          resolve();
+        }
+        
+        console.log(`🚀 DIRECT: Progress simulation: ${Math.round(progress * 100)}%`);
+        onProgress?.(progress);
+      }, 2000);
+      
+      // Ensure we stop the interval after max time
+      setTimeout(() => {
+        clearInterval(progressInterval);
+        resolve();
+      }, estimatedTotalTime);
+    });
+
+    // Add timeout for the fetch request (5 minutes max)
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      setTimeout(() => {
+        reject(new Error(`Processing timeout: Export took longer than 5 minutes`));
+      }, 5 * 60 * 1000); // 5 minutes
+    });
+
+    let response: Response;
+    
+    try {
+      // Wait for fetch to complete, with timeout
+      response = await Promise.race([fetchPromise, timeoutPromise]);
+      
+      // Cancel progress simulation if still running
+      await progressPromise;
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ error: 'Processing failed' }));
+        const errorMessage = errorData.error || errorData.details || response.statusText;
+        
+        // Provide more helpful error messages
+        if (response.status === 413) {
+          throw new Error('Video files are too large. Try using lower quality or shorter clips.');
+        } else if (response.status === 500) {
+          throw new Error(`Server processing error: ${errorMessage}. Try using "Fast Export" mode.`);
+        } else {
+          throw new Error(`Direct processing failed: ${errorMessage}`);
+        }
+      }
+    } catch (error) {
+      // Handle timeout or other errors
+      if (error instanceof Error && error.message.includes('timeout')) {
+        console.error('🚀 DIRECT: Processing timeout detected');
+        throw new Error('Export is taking too long. Try using "Fast Export" for quicker results.');
+      }
+      throw error;
     }
 
-    // Simple progress update
+    // Update to 90% when response received
     onProgress?.(0.90);
 
-    const { success, outputUrl, processingTime } = await response.json();
+    const { success, outputUrl, processingTime, details } = await response.json();
     
     if (!success) {
       throw new Error('Direct processing failed');
@@ -608,7 +670,8 @@ export const processVideoWithBeatsDirect = async (
       outputUrl,
       processingTimeMs: processingTime,
       totalTimeMs: totalProcessingTime,
-      method: quality
+      method: quality,
+      details: details || {}
     });
 
     // Complete progress

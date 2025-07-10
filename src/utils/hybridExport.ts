@@ -85,7 +85,9 @@ export async function hybridVideoExport(
   
   // Adapt our progress callback to match ffmpeg's signature
   const progressAdapter = onProgress ? (progress: number) => {
-    onProgress(progress, 'Server processing...');
+    // Convert 0-1 progress to 0-100 percentage
+    const percentage = Math.round(progress * 100);
+    onProgress(percentage, `Server processing... ${percentage}%`);
   } : undefined;
   
   return await processVideoWithBeatsDirect(videos, beatMarkers, audioFile, 'export', options.quality, progressAdapter);
