@@ -2,7 +2,7 @@
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Upload, Play, Pause, Download, Edit2, Plus, FileAudio, Sparkles, Film, ChevronLeft, ChevronRight, Check, Info, Music, Video, ChevronDown } from 'lucide-react';
+import { Upload, Play, Pause, Download, Edit2, Plus, FileAudio, Sparkles, Film, ChevronLeft, ChevronRight, Check, Info, Music, Video } from 'lucide-react';
 import { AudioAnalyzer } from '@/src/services/AudioAnalyzer';
 import { toast } from 'sonner';
 import { useVideoStore } from '@/src/stores/videoStore';
@@ -826,79 +826,15 @@ export default function EditPage() {
                     />
                   </label>
 
-                  {/* Export with quality options */}
-                  <div className="relative z-[1000]">
-                    <button
-                      onClick={() => setShowExportOptions(!showExportOptions)}
-                      disabled={beats.some(beat => !beat.videoClip) || isExporting}
-                      className="px-4 py-1.5 rounded-lg bg-gradient-to-r from-purple-500 to-blue-500 font-medium text-sm disabled:opacity-50 disabled:cursor-not-allowed hover:shadow-lg hover:shadow-purple-500/25 transition-all flex items-center gap-1.5"
-                    >
-                      <Download className="w-4 h-4" />
-                      Export
-                      <ChevronDown className={`w-3 h-3 transition-transform ${showExportOptions ? 'rotate-180' : ''}`} />
-                    </button>
-                    
-                    {/* Export quality dropdown */}
-                    {showExportOptions && !isExporting && (
-                      <div className="fixed right-[2rem] top-[4.5rem] w-48 bg-gray-800 border border-gray-700 rounded-lg shadow-xl z-[9999]">
-                        <div className="p-2">
-                          <button
-                            onClick={() => {
-                              setExportQuality('fast');
-                              setShowExportOptions(false);
-                              handleExport();
-                            }}
-                            className="w-full text-left px-3 py-2 rounded hover:bg-gray-700 transition-colors"
-                          >
-                            <div className="font-medium text-sm flex items-center gap-2">
-                              Fast Export
-                              {exportCapabilities.webCodecs && (
-                                <span className="text-xs bg-green-500/20 text-green-400 px-1.5 py-0.5 rounded">
-                                  WebCodecs
-                                </span>
-                              )}
-                            </div>
-                            <div className="text-xs text-gray-400">
-                              {exportCapabilities.webCodecs ? 'Ultra-fast browser processing' : 'Lower quality, quick preview'}
-                            </div>
-                          </button>
-                          
-                          <button
-                            onClick={() => {
-                              setExportQuality('balanced');
-                              setShowExportOptions(false);
-                              handleExport();
-                            }}
-                            className="w-full text-left px-3 py-2 rounded hover:bg-gray-700 transition-colors"
-                          >
-                            <div className="font-medium text-sm flex items-center gap-2">
-                              Balanced Export
-                              {exportCapabilities.mediaRecorder && beats.length <= 5 && (
-                                <span className="text-xs bg-blue-500/20 text-blue-400 px-1.5 py-0.5 rounded">
-                                  Canvas
-                                </span>
-                              )}
-                            </div>
-                            <div className="text-xs text-gray-400">
-                              {exportCapabilities.mediaRecorder && beats.length <= 5 ? 'Fast canvas rendering' : 'Good quality, moderate speed'}
-                            </div>
-                          </button>
-                          
-                          <button
-                            onClick={() => {
-                              setExportQuality('high');
-                              setShowExportOptions(false);
-                              handleExport();
-                            }}
-                            className="w-full text-left px-3 py-2 rounded hover:bg-gray-700 transition-colors"
-                          >
-                            <div className="font-medium text-sm">High Quality</div>
-                            <div className="text-xs text-gray-400">Best quality, slower processing</div>
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                  </div>
+                  {/* Export button */}
+                  <button
+                    onClick={() => setShowExportOptions(true)}
+                    disabled={beats.some(beat => !beat.videoClip) || isExporting}
+                    className="px-4 py-1.5 rounded-lg bg-gradient-to-r from-purple-500 to-blue-500 font-medium text-sm disabled:opacity-50 disabled:cursor-not-allowed hover:shadow-lg hover:shadow-purple-500/25 transition-all flex items-center gap-1.5"
+                  >
+                    <Download className="w-4 h-4" />
+                    Export
+                  </button>
                 </div>
               </div>
             </div>
@@ -1285,6 +1221,123 @@ export default function EditPage() {
                 Create Another Video
               </button>
       </div>
+          </motion.div>
+        )}
+
+        {/* Export Quality Modal */}
+        {showExportOptions && !isExporting && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 backdrop-blur-sm"
+            onClick={() => setShowExportOptions(false)}
+          >
+            <motion.div
+              initial={{ y: 100, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              exit={{ y: 100, opacity: 0 }}
+              className="w-full max-w-lg bg-gray-900 border-t border-gray-800 rounded-t-2xl p-6"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="mb-6">
+                <h2 className="text-xl font-bold mb-2">Choose Export Quality</h2>
+                <p className="text-gray-400 text-sm">Select the quality that best fits your needs</p>
+              </div>
+
+              <div className="space-y-3">
+                {/* Fast Export */}
+                <button
+                  onClick={() => {
+                    setExportQuality('fast');
+                    setShowExportOptions(false);
+                    handleExport();
+                  }}
+                  className="w-full p-4 bg-gray-800 hover:bg-gray-700 rounded-xl transition-colors text-left group"
+                >
+                  <div className="flex items-start justify-between">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2 mb-1">
+                        <h3 className="font-medium">Fast Export</h3>
+                        {exportCapabilities.webCodecs && (
+                          <span className="text-xs bg-green-500/20 text-green-400 px-2 py-0.5 rounded-full">
+                            WebCodecs
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-sm text-gray-400">
+                        {exportCapabilities.webCodecs ? 'Ultra-fast browser processing' : 'Lower quality, quick preview'}
+                      </p>
+                      <p className="text-xs text-gray-500 mt-1">480p • ~3-5x faster</p>
+                    </div>
+                    <div className="text-purple-400 group-hover:text-purple-300">
+                      <Sparkles className="w-5 h-5" />
+                    </div>
+                  </div>
+                </button>
+
+                {/* Balanced Export */}
+                <button
+                  onClick={() => {
+                    setExportQuality('balanced');
+                    setShowExportOptions(false);
+                    handleExport();
+                  }}
+                  className="w-full p-4 bg-gray-800 hover:bg-gray-700 rounded-xl transition-colors text-left group"
+                >
+                  <div className="flex items-start justify-between">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2 mb-1">
+                        <h3 className="font-medium">Balanced Export</h3>
+                        {exportCapabilities.mediaRecorder && beats.length <= 5 && (
+                          <span className="text-xs bg-blue-500/20 text-blue-400 px-2 py-0.5 rounded-full">
+                            Canvas
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-sm text-gray-400">
+                        {exportCapabilities.mediaRecorder && beats.length <= 5 ? 'Fast canvas rendering' : 'Good quality, moderate speed'}
+                      </p>
+                      <p className="text-xs text-gray-500 mt-1">720p • ~2x faster</p>
+                    </div>
+                    <div className="text-blue-400 group-hover:text-blue-300">
+                      <Film className="w-5 h-5" />
+                    </div>
+                  </div>
+                </button>
+
+                {/* High Quality Export */}
+                <button
+                  onClick={() => {
+                    setExportQuality('high');
+                    setShowExportOptions(false);
+                    handleExport();
+                  }}
+                  className="w-full p-4 bg-gray-800 hover:bg-gray-700 rounded-xl transition-colors text-left group"
+                >
+                  <div className="flex items-start justify-between">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2 mb-1">
+                        <h3 className="font-medium">High Quality</h3>
+                      </div>
+                      <p className="text-sm text-gray-400">Best quality, slower processing</p>
+                      <p className="text-xs text-gray-500 mt-1">1080p • Standard speed</p>
+                    </div>
+                    <div className="text-emerald-400 group-hover:text-emerald-300">
+                      <Download className="w-5 h-5" />
+                    </div>
+                  </div>
+                </button>
+              </div>
+
+              {/* Cancel button */}
+              <button
+                onClick={() => setShowExportOptions(false)}
+                className="w-full mt-4 py-2 text-gray-400 hover:text-white transition-colors"
+              >
+                Cancel
+              </button>
+            </motion.div>
           </motion.div>
         )}
       </AnimatePresence>
