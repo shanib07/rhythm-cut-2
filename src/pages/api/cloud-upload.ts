@@ -1,5 +1,4 @@
 import { NextApiRequest, NextApiResponse } from 'next';
-import { Storage } from '@google-cloud/storage';
 import formidable from 'formidable';
 import fs from 'fs';
 
@@ -10,24 +9,20 @@ export const config = {
   },
 };
 
-// Initialize Google Cloud Storage
-let storage: Storage | null = null;
-
-function getStorageClient(): Storage {
-  if (!storage) {
-    const credentialsJson = process.env.GOOGLE_CLOUD_CREDENTIALS;
-    if (!credentialsJson) {
-      throw new Error('GOOGLE_CLOUD_CREDENTIALS environment variable not set');
-    }
-
-    const credentials = JSON.parse(credentialsJson);
-    storage = new Storage({
-      projectId: process.env.GOOGLE_CLOUD_PROJECT_ID || 'rhythm-cut-466519',
-      credentials
-    });
-  }
+// Initialize Google Cloud Storage (dynamic import for server-only)
+async function getStorageClient() {
+  const { Storage } = await import('@google-cloud/storage');
   
-  return storage;
+  const credentialsJson = process.env.GOOGLE_CLOUD_CREDENTIALS;
+  if (!credentialsJson) {
+    throw new Error('GOOGLE_CLOUD_CREDENTIALS environment variable not set');
+  }
+
+  const credentials = JSON.parse(credentialsJson);
+  return new Storage({
+    projectId: process.env.GOOGLE_CLOUD_PROJECT_ID || 'rhythm-cut-466519',
+    credentials
+  });
 }
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
@@ -42,7 +37,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const form = formidable({ multiples: true });
     const [fields, files] = await form.parse(req);
     
-    const storage = getStorageClient();
+    const storage = await getStorageClient();
     const bucket = storage.bucket(process.env.GOOGLE_CLOUD_INPUT_BUCKET || 'rhythm-cut-inputs-466519');
     
     // Handle multiple files
