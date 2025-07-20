@@ -12,11 +12,12 @@ WORKDIR /usr/src/app
 # Copy package files
 COPY package*.json ./
 
-# Install dependencies
-RUN npm install
+# Install dependencies (production only, no dev dependencies)
+RUN npm ci --only=production
 
-# Copy app source
-COPY . .
+# Copy app source (only the files we need)
+COPY index.js ./
+COPY deploy.sh ./
 
 # Expose port
 EXPOSE 8080
