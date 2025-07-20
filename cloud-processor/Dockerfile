@@ -10,17 +10,16 @@ RUN apt-get update && apt-get install -y \
 WORKDIR /usr/src/app
 
 # Copy package files
-COPY package*.json ./
+COPY package.json ./
 
-# Install dependencies (production only, no dev dependencies)
-RUN npm ci --only=production
+# Install dependencies
+RUN npm install --omit=dev
 
-# Copy app source (only the files we need)
+# Copy app source
 COPY index.js ./
-COPY deploy.sh ./
 
 # Expose port
 EXPOSE 8080
 
 # Start the application
-CMD ["npm", "start"]
+CMD ["node", "index.js"]
