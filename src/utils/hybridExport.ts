@@ -76,21 +76,53 @@ export async function hybridVideoExport(
     }
   }
   
-  // Method 3: Server-side FFmpeg (Most reliable)
-  console.log('🔧 Using server-side FFmpeg processing');
-  onProgress?.(0, 'Starting server processing...');
+  // Method 3: Google Cloud processing (Most reliable and fastest for server-side)
+  console.log('☁️ Using Google Cloud Run processing');
+  onProgress?.(0, 'Starting cloud processing...');
   
-  // Import the existing server processing function
-  const { processVideoWithBeatsDirect } = await import('./ffmpeg');
-  
-  // Adapt our progress callback to match ffmpeg's signature
-  const progressAdapter = onProgress ? (progress: number) => {
-    // Convert 0-1 progress to 0-100 percentage
-    const percentage = Math.round(progress * 100);
-    onProgress(percentage, `Server processing... ${percentage}%`);
-  } : undefined;
-  
-  return await processVideoWithBeatsDirect(videos, beatMarkers, audioFile, 'export', options.quality, progressAdapter);
+  try {
+    // Import Google Cloud client
+    const { uploadVideosToCloudStorage, processVideoOnCloudRun, downloadFromCloudStorage } = 
+      await import('./googleCloudClient');
+    
+    // Step 1: Upload videos to Cloud Storage
+    onProgress?.(10, 'Uploading videos to cloud storage...');
+    const videoFiles = videos.map(v => v.file);
+    const uploadedVideos = await uploadVideosToCloudStorage(videoFiles);
+    
+    // Step 2: Process on Cloud Run
+    onProgress?.(30, 'Processing video on Google Cloud...');
+    const result = await processVideoOnCloudRun(
+      uploadedVideos, 
+      beatMarkers, 
+      `project-${Date.now()}`, 
+      options.quality
+    );
+    
+    if (!result.success) {
+      throw new Error(result.error || 'Cloud processing failed');
+    }
+    
+    // Step 3: Download processed video
+    onProgress?.(80, 'Downloading processed video...');
+    const videoBlob = await downloadFromCloudStorage(result.outputUrl!);
+    
+    onProgress?.(100, 'Cloud processing complete!');
+    return URL.createObjectURL(videoBlob);
+    
+  } catch (cloudError) {
+    console.warn('Google Cloud processing failed, falling back to local server...', cloudError);
+    
+    // Fallback to local server processing
+    const { processVideoWithBeatsDirect } = await import('./ffmpeg');
+    
+    const progressAdapter = onProgress ? (progress: number) => {
+      const percentage = Math.round(progress * 100);
+      onProgress(percentage, `Local server processing... ${percentage}%`);
+    } : undefined;
+    
+    return await processVideoWithBeatsDirect(videos, beatMarkers, audioFile, 'export', options.quality, progressAdapter);
+  }
 }
 
 // WebCodecs implementation (client-side, ultra-fast)

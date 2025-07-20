@@ -148,3 +148,40 @@ Use `/beat-test` page to compare algorithms:
 - **Onset Detection**: Best for most music types
 - **Energy-based**: Good for electronic/dance music
 - **Valley-to-peak**: Alternative for complex rhythms
+
+## Hybrid Export System
+
+The application uses a sophisticated hybrid export system that attempts multiple processing methods in order of preference:
+
+### Export Method Priority
+1. **WebCodecs API**: Browser-based, ultra-fast (5-10x faster than FFmpeg)
+2. **Canvas + MediaRecorder**: Client-side fallback with broader browser support  
+3. **Server-side FFmpeg**: Most reliable, handles all video formats
+
+### Export Quality Settings
+The `hybridVideoExport` function in `src/utils/hybridExport.ts` manages the fallback chain and automatically selects the best available method based on browser capabilities and quality requirements.
+
+## Critical Processing Notes
+
+### Server Worker Architecture
+- **`server/start.js`**: Orchestrates both Next.js app and worker processes
+- **`server/worker.js`**: Bull queue worker for background video processing
+- **Separation**: Web server and video worker run as separate processes in production
+
+### File Upload Constraints
+- **Railway Bandwidth**: Limited network bandwidth affects large video uploads
+- **File Size Limits**: Configure multer limits based on deployment platform
+- **Temporary Storage**: Videos stored in `public/uploads/` before processing, cleaned up after completion
+
+### Processing Flow Details
+1. **Upload Phase**: Videos uploaded to `/api/upload` with progress tracking
+2. **Queue Phase**: Job added to Bull queue with Redis for scalability
+3. **Worker Phase**: Background processing with FFmpeg segmentation
+4. **Concat Phase**: Uses FFmpeg concat demuxer for seamless video joining
+5. **Download Phase**: Final video served via `/api/download/[projectId]`
+
+# important-instruction-reminders
+Do what has been asked; nothing more, nothing less.
+NEVER create files unless they're absolutely necessary for achieving your goal.
+ALWAYS prefer editing an existing file to creating a new one.
+NEVER proactively create documentation files (*.md) or README files. Only create documentation files if explicitly requested by the User.
