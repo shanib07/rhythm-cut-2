@@ -659,11 +659,18 @@ export const VideoEditor: React.FC = () => {
                 <option value="balanced">Balanced (720p, Recommended)</option>
                 <option value="high">High Quality (1080p, Best Output)</option>
               </select>
-              <p className="text-xs text-gray-500 mt-1">
-                {exportQuality === 'fast' && '⚡ Faster processing with good quality'}
-                {exportQuality === 'balanced' && '✨ Best balance of speed and quality'}
-                {exportQuality === 'high' && '🎬 Maximum quality for professional output'}
-              </p>
+              <div className="text-xs text-gray-500 mt-1 space-y-1">
+                <p>
+                  {exportQuality === 'fast' && '⚡ Faster processing with good quality'}
+                  {exportQuality === 'balanced' && '✨ Best balance of speed and quality'}
+                  {exportQuality === 'high' && '🎬 Maximum quality for professional output'}
+                </p>
+                <p>
+                  {exportMethod === 'hybrid' && '🔄 Will try cloud processing first, fallback to local if needed'}
+                  {exportMethod === 'cloud' && '☁️ Uses Google Cloud Run for fastest processing'}
+                  {exportMethod === 'local' && '🖥️ Processes on Railway server (reliable, no internet needed)'}
+                </p>
+              </div>
             </div>
             
             {isProcessing ? (
