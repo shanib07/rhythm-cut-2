@@ -13,11 +13,17 @@ export interface ProcessingResult {
   processingTimeMs?: number;
 }
 
-export async function uploadVideosToCloudStorage(videos: File[]): Promise<VideoInput[]> {
+export async function uploadVideosToCloudStorage(
+  videos: File[], 
+  onProgress?: (progress: number, message: string) => void
+): Promise<VideoInput[]> {
+  const totalSize = videos.reduce((sum, v) => sum + v.size, 0);
   console.log('📤 Uploading videos to Google Cloud Storage via Railway API', {
     videoCount: videos.length,
-    totalSize: videos.reduce((sum, v) => sum + v.size, 0)
+    totalSize
   });
+  
+  onProgress?.(5, `Preparing ${videos.length} videos for upload (${Math.round(totalSize / 1024 / 1024)}MB)...`);
   
   const formData = new FormData();
   videos.forEach((video, index) => {
@@ -25,25 +31,56 @@ export async function uploadVideosToCloudStorage(videos: File[]): Promise<VideoI
     console.log(`📦 Added video ${index + 1}: ${video.name} (${Math.round(video.size / 1024 / 1024)}MB)`);
   });
   
+  onProgress?.(10, 'Starting upload to Google Cloud Storage...');
+  
   try {
-    const response = await fetch('/api/cloud-upload', {
-      method: 'POST',
-      body: formData,
+    // Use XMLHttpRequest to track upload progress
+    const result = await new Promise<VideoInput[]>((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      
+      // Track upload progress
+      xhr.upload.addEventListener('progress', (event) => {
+        if (event.lengthComputable) {
+          const percentComplete = (event.loaded / event.total) * 80; // Reserve 20% for processing
+          const uploadedMB = Math.round(event.loaded / 1024 / 1024);
+          const totalMB = Math.round(event.total / 1024 / 1024);
+          onProgress?.(10 + percentComplete, `Uploading... ${uploadedMB}MB / ${totalMB}MB`);
+        }
+      });
+      
+      xhr.addEventListener('load', () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          onProgress?.(90, 'Upload complete, processing response...');
+          try {
+            const response = JSON.parse(xhr.responseText);
+            resolve(response.videos);
+          } catch (e) {
+            reject(new Error('Failed to parse response'));
+          }
+        } else {
+          console.error('❌ Upload failed with status:', xhr.status);
+          console.error('❌ Upload error details:', xhr.responseText);
+          reject(new Error(`Upload failed (${xhr.status}): ${xhr.responseText}`));
+        }
+      });
+      
+      xhr.addEventListener('error', () => {
+        reject(new Error('Network error during upload'));
+      });
+      
+      xhr.addEventListener('timeout', () => {
+        reject(new Error('Upload timed out'));
+      });
+      
+      xhr.open('POST', '/api/cloud-upload');
+      xhr.timeout = 300000; // 5 minute timeout
+      xhr.send(formData);
     });
     
-    console.log('🌐 Upload response status:', response.status, response.statusText);
-    
-    if (!response.ok) {
-      const error = await response.text();
-      console.error('❌ Upload failed with status:', response.status);
-      console.error('❌ Upload error details:', error);
-      throw new Error(`Upload failed (${response.status}): ${error}`);
-    }
-    
-    const result = await response.json();
     console.log('✅ Videos uploaded to Cloud Storage successfully', result);
+    onProgress?.(100, 'Upload complete!');
     
-    return result.videos;
+    return result;
   } catch (error) {
     console.error('❌ Upload request failed:', error);
     if (error instanceof TypeError && error.message.includes('fetch')) {

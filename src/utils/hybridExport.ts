@@ -85,10 +85,13 @@ export async function hybridVideoExport(
     const { uploadVideosToCloudStorage, processVideoOnCloudRun, downloadFromCloudStorage } = 
       await import('./googleCloudClient');
     
-    // Step 1: Upload videos to Cloud Storage
-    onProgress?.(10, 'Uploading videos to cloud storage...');
+    // Step 1: Upload videos to Cloud Storage with progress tracking
     const videoFiles = videos.map(v => v.file);
-    const uploadedVideos = await uploadVideosToCloudStorage(videoFiles);
+    const uploadedVideos = await uploadVideosToCloudStorage(videoFiles, (uploadProgress, message) => {
+      // Map upload progress to 10-30% of total progress
+      const totalProgress = 10 + (uploadProgress * 0.2);
+      onProgress?.(totalProgress, message);
+    });
     
     // Step 2: Process on Cloud Run
     onProgress?.(30, 'Processing video on Google Cloud...');
