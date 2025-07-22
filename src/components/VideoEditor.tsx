@@ -8,6 +8,7 @@ import { VideoClip, BeatMarker, TimelineSegment } from '../types';
 import { toast } from 'sonner';
 import { ProgressBar } from './ProgressBar';
 import { uploadVideoFile, getVideoMetadata, processVideoWithBeats, processVideoWithBeatsDirect } from '../utils/ffmpeg';
+import { hybridVideoExport } from '../utils/hybridExport';
 
 export const VideoEditor: React.FC = () => {
   const {
@@ -46,6 +47,7 @@ export const VideoEditor: React.FC = () => {
     projectId: null as string | null
   });
   const [exportQuality, setExportQuality] = useState<'fast' | 'balanced' | 'high'>('balanced');
+  const [exportMethod, setExportMethod] = useState<'local' | 'cloud' | 'hybrid'>('hybrid');
   const [lastUpdateTime, setLastUpdateTime] = useState(0);
   const seekTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -356,23 +358,82 @@ export const VideoEditor: React.FC = () => {
         message: 'Starting server-side processing...'
       }));
 
-      // Use direct processing for faster exports (bypasses queue)
-      const outputUrl = await processVideoWithBeatsDirect(
-        videosForProcessing,
-        beatMarkers,
-        audioFile,
-        `Rhythm Cut Export - ${new Date().toISOString()}`,
-        exportQuality,
-        (progress) => {
-          console.log('🎬 EXPORT: Progress update received', { progress: `${(progress * 100).toFixed(1)}%` });
-          setExportProgress(prev => ({
-            ...prev,
-            progress: Math.round(progress * 100),
-            status: 'processing',
-            message: `Processing video... ${Math.round(progress * 100)}%`
-          }));
+      let outputUrl: string;
+      
+      // Choose processing method based on user selection
+      if (exportMethod === 'hybrid' || exportMethod === 'cloud') {
+        console.log(`🎬 EXPORT: Using ${exportMethod} processing`);
+        setExportProgress(prev => ({
+          ...prev,
+          message: 'Starting cloud processing...'
+        }));
+        
+        try {
+          // Use hybrid export system (tries cloud first, falls back to local)
+          outputUrl = await hybridVideoExport(
+            videosForProcessing.map(v => ({ file: v.file, id: v.id })),
+            beatMarkers,
+            audioFile,
+            {
+              quality: exportQuality,
+              onProgress: (progress, message) => {
+                console.log('🎬 EXPORT: Hybrid progress update', { progress, message });
+                setExportProgress(prev => ({
+                  ...prev,
+                  progress: Math.round(progress * 100),
+                  status: 'processing',
+                  message: message || `Processing... ${Math.round(progress * 100)}%`
+                }));
+              }
+            }
+          );
+        } catch (error) {
+          console.log('🎬 EXPORT: Cloud processing failed, falling back to local processing');
+          if (exportMethod === 'cloud') {
+            throw error; // If user specifically chose cloud, don't fallback
+          }
+          // Fall back to local processing for hybrid mode
+          outputUrl = await processVideoWithBeatsDirect(
+            videosForProcessing,
+            beatMarkers,
+            audioFile,
+            `Rhythm Cut Export - ${new Date().toISOString()}`,
+            exportQuality,
+            (progress) => {
+              setExportProgress(prev => ({
+                ...prev,
+                progress: Math.round(progress * 100),
+                status: 'processing',
+                message: `Processing locally... ${Math.round(progress * 100)}%`
+              }));
+            }
+          );
         }
-      );
+      } else {
+        // Local processing only
+        console.log('🎬 EXPORT: Using local processing');
+        setExportProgress(prev => ({
+          ...prev,
+          message: 'Starting local processing...'
+        }));
+        
+        outputUrl = await processVideoWithBeatsDirect(
+          videosForProcessing,
+          beatMarkers,
+          audioFile,
+          `Rhythm Cut Export - ${new Date().toISOString()}`,
+          exportQuality,
+          (progress) => {
+            console.log('🎬 EXPORT: Progress update received', { progress: `${(progress * 100).toFixed(1)}%` });
+            setExportProgress(prev => ({
+              ...prev,
+              progress: Math.round(progress * 100),
+              status: 'processing',
+              message: `Processing video... ${Math.round(progress * 100)}%`
+            }));
+          }
+        );
+      }
 
       console.log('🎬 EXPORT: Processing completed successfully', { outputUrl });
 
@@ -569,6 +630,21 @@ export const VideoEditor: React.FC = () => {
           {/* Export Section */}
           <div className="bg-gray-50 p-4 rounded-lg">
             <h3 className="text-black font-semibold mb-3" style={{ color: 'black' }}>Export Video</h3>
+            
+            {/* Export Method Selector */}
+            <div className="mb-4">
+              <label className="text-sm text-gray-600 block mb-2">Processing Method:</label>
+              <select
+                value={exportMethod}
+                onChange={(e) => setExportMethod(e.target.value as 'local' | 'cloud' | 'hybrid')}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-black"
+                disabled={isProcessing}
+              >
+                <option value="hybrid">🔄 Hybrid (Cloud first, local fallback) - Recommended</option>
+                <option value="cloud">☁️ Cloud Only (Fastest, requires internet)</option>
+                <option value="local">🖥️ Local Only (Reliable, works offline)</option>
+              </select>
+            </div>
             
             {/* Quality Selector */}
             <div className="mb-4">
