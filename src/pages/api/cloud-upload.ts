@@ -18,9 +18,19 @@ async function getStorageClient() {
     throw new Error('GOOGLE_CLOUD_CREDENTIALS or GOOGLE_APPLICATION_CREDENTIALS environment variable not set');
   }
 
-  const credentials = JSON.parse(credentialsJson);
+  let credentials;
+  try {
+    console.log('🔍 Attempting to parse credentials JSON...');
+    credentials = JSON.parse(credentialsJson);
+    console.log('✅ Successfully parsed credentials, project_id:', credentials.project_id);
+  } catch (parseError) {
+    console.error('❌ Failed to parse credentials JSON:', parseError);
+    console.log('Raw credentials (first 100 chars):', credentialsJson.substring(0, 100));
+    throw new Error('Invalid Google Cloud credentials format - not valid JSON');
+  }
+  
   return new Storage({
-    projectId: process.env.GOOGLE_CLOUD_PROJECT_ID || 'rhythm-cut-466519',
+    projectId: process.env.GOOGLE_CLOUD_PROJECT_ID || credentials.project_id || 'rhythm-cut-466519',
     credentials
   });
 }
@@ -31,22 +41,32 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   }
 
   try {
-    console.log('📤 Cloud upload request received');
+    console.log('📤 Cloud upload request received - v3');
+    
+    // Debug environment variables
+    console.log('🔍 Environment variable debug:');
+    console.log('  GOOGLE_CLOUD_CREDENTIALS exists:', !!process.env.GOOGLE_CLOUD_CREDENTIALS);
+    console.log('  GOOGLE_APPLICATION_CREDENTIALS exists:', !!process.env.GOOGLE_APPLICATION_CREDENTIALS);
+    console.log('  NODE_ENV:', process.env.NODE_ENV);
     
     // Check for required environment variables first
     const credentialsJson = process.env.GOOGLE_CLOUD_CREDENTIALS || process.env.GOOGLE_APPLICATION_CREDENTIALS;
     if (!credentialsJson) {
-      console.error('❌ GOOGLE_CLOUD_CREDENTIALS or GOOGLE_APPLICATION_CREDENTIALS environment variable not set');
+      console.error('❌ No Google Cloud credentials found in environment');
+      console.log('Available env vars:', Object.keys(process.env).filter(key => key.includes('GOOGLE')));
       return res.status(500).json({ 
         error: 'Google Cloud not configured', 
-        message: 'GOOGLE_CLOUD_CREDENTIALS or GOOGLE_APPLICATION_CREDENTIALS environment variable not set' 
+        message: 'No Google Cloud credentials environment variable found' 
       });
     }
+    
+    console.log('✅ Found credentials, length:', credentialsJson.length);
+    console.log('✅ Credentials start:', credentialsJson.substring(0, 50) + '...');
     
     // Parse multipart form data
     console.log('🔍 Parsing multipart form data...');
     const form = formidable({ multiples: true });
-    const [fields, files] = await form.parse(req);
+    const [, files] = await form.parse(req);
     
     console.log('📦 Files received:', Object.keys(files));
     
