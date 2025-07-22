@@ -19,10 +19,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     let cloudRunHealthy = false;
     if (process.env.GOOGLE_CLOUD_RUN_URL) {
       try {
+        // Use AbortController for timeout
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 5000);
+        
         const healthResponse = await fetch(process.env.GOOGLE_CLOUD_RUN_URL, {
           method: 'GET',
-          timeout: 5000
+          signal: controller.signal
         });
+        
+        clearTimeout(timeoutId);
         cloudRunHealthy = healthResponse.ok;
       } catch (error) {
         console.log('Cloud Run health check failed:', error);
