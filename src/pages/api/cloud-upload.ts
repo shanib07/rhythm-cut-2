@@ -63,9 +63,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     console.log('✅ Found credentials, length:', credentialsJson.length);
     console.log('✅ Credentials start:', credentialsJson.substring(0, 50) + '...');
     
-    // Parse multipart form data
+    // Parse multipart form data with increased limits
     console.log('🔍 Parsing multipart form data...');
-    const form = formidable({ multiples: true });
+    const form = formidable({ 
+      multiples: true,
+      maxFileSize: 500 * 1024 * 1024, // 500MB per file
+      maxTotalFileSize: 2000 * 1024 * 1024, // 2GB total
+      maxFieldsSize: 2000 * 1024 * 1024, // 2GB total fields
+    });
     const [, files] = await form.parse(req);
     
     console.log('📦 Files received:', Object.keys(files));
@@ -81,12 +86,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         const fileName = `${Date.now()}-${index}-${file.originalFilename}`;
         const cloudPath = `uploads/${fileName}`;
         
-        // Upload to Cloud Storage
+        console.log(`🚀 Starting upload ${index + 1}/${fileArray.length}: ${file.originalFilename} (${(file.size / 1024 / 1024).toFixed(1)}MB)`);
+        
+        // Upload to Cloud Storage with progress
         await bucket.upload(file.filepath, {
           destination: cloudPath,
           metadata: {
             contentType: file.mimetype,
           },
+          resumable: file.size > 10 * 1024 * 1024, // Use resumable upload for files > 10MB
         });
         
         // Clean up temp file
