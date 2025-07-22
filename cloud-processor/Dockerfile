@@ -15,6 +15,9 @@ COPY package.json ./
 # Install dependencies
 RUN npm install --omit=dev
 
+# Run build script (no-op for this service)
+RUN npm run build
+
 # Copy app source
 COPY index.js ./
 

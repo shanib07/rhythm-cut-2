@@ -41,6 +41,12 @@ npx prisma migrate dev   # Create and apply migrations
 
 ## Architecture
 
+### Google Cloud Processing Pipeline
+- **`cloud-processor/`**: Standalone Node.js service for Google Cloud Run
+- **Google Cloud Storage**: File storage for cloud processing pipeline
+- **Cloud Run**: Containerized video processing with better performance than Railway
+- **Migration Status**: Active transition from Railway to Google Cloud infrastructure
+
 ### Application Structure
 - **`/` (Landing)**: Three-card navigation to different editing modes
 - **`/easyedit`**: 3-step automated workflow (audio → video → process)
