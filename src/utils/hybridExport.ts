@@ -113,6 +113,19 @@ export async function hybridVideoExport(
   } catch (cloudError) {
     console.warn('Google Cloud processing failed, falling back to local server...', cloudError);
     
+    // Provide specific error message to user
+    const errorMessage = cloudError instanceof Error ? cloudError.message : 'Unknown error';
+    if (errorMessage.includes('GOOGLE_CLOUD_CREDENTIALS')) {
+      onProgress?.(0, 'Cloud not configured, using local processing...');
+    } else if (errorMessage.includes('Network error')) {
+      onProgress?.(0, 'Cloud unreachable, using local processing...');
+    } else {
+      onProgress?.(0, 'Cloud failed, using local processing...');
+    }
+    
+    // Wait a moment to show the fallback message
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    
     // Fallback to local server processing
     const { processVideoWithBeatsDirect } = await import('./ffmpeg');
     

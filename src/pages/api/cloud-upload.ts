@@ -33,9 +33,22 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   try {
     console.log('📤 Cloud upload request received');
     
+    // Check for required environment variables first
+    const credentialsJson = process.env.GOOGLE_CLOUD_CREDENTIALS;
+    if (!credentialsJson) {
+      console.error('❌ GOOGLE_CLOUD_CREDENTIALS environment variable not set');
+      return res.status(500).json({ 
+        error: 'Google Cloud not configured', 
+        message: 'GOOGLE_CLOUD_CREDENTIALS environment variable not set' 
+      });
+    }
+    
     // Parse multipart form data
+    console.log('🔍 Parsing multipart form data...');
     const form = formidable({ multiples: true });
     const [fields, files] = await form.parse(req);
+    
+    console.log('📦 Files received:', Object.keys(files));
     
     const storage = await getStorageClient();
     const bucket = storage.bucket(process.env.GOOGLE_CLOUD_INPUT_BUCKET || 'rhythm-cut-inputs-466519');

@@ -14,27 +14,43 @@ export interface ProcessingResult {
 }
 
 export async function uploadVideosToCloudStorage(videos: File[]): Promise<VideoInput[]> {
-  console.log('📤 Uploading videos to Google Cloud Storage via Railway API');
+  console.log('📤 Uploading videos to Google Cloud Storage via Railway API', {
+    videoCount: videos.length,
+    totalSize: videos.reduce((sum, v) => sum + v.size, 0)
+  });
   
   const formData = new FormData();
   videos.forEach((video, index) => {
     formData.append('videos', video);
+    console.log(`📦 Added video ${index + 1}: ${video.name} (${Math.round(video.size / 1024 / 1024)}MB)`);
   });
   
-  const response = await fetch('/api/cloud-upload', {
-    method: 'POST',
-    body: formData,
-  });
-  
-  if (!response.ok) {
-    const error = await response.text();
-    throw new Error(`Upload failed: ${error}`);
+  try {
+    const response = await fetch('/api/cloud-upload', {
+      method: 'POST',
+      body: formData,
+    });
+    
+    console.log('🌐 Upload response status:', response.status, response.statusText);
+    
+    if (!response.ok) {
+      const error = await response.text();
+      console.error('❌ Upload failed with status:', response.status);
+      console.error('❌ Upload error details:', error);
+      throw new Error(`Upload failed (${response.status}): ${error}`);
+    }
+    
+    const result = await response.json();
+    console.log('✅ Videos uploaded to Cloud Storage successfully', result);
+    
+    return result.videos;
+  } catch (error) {
+    console.error('❌ Upload request failed:', error);
+    if (error instanceof TypeError && error.message.includes('fetch')) {
+      throw new Error('Network error: Unable to reach cloud upload service');
+    }
+    throw error;
   }
-  
-  const result = await response.json();
-  console.log('✅ Videos uploaded to Cloud Storage');
-  
-  return result.videos;
 }
 
 export async function processVideoOnCloudRun(
