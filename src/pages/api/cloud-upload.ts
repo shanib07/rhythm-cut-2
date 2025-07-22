@@ -13,9 +13,9 @@ export const config = {
 async function getStorageClient() {
   const { Storage } = await import('@google-cloud/storage');
   
-  const credentialsJson = process.env.GOOGLE_CLOUD_CREDENTIALS;
+  const credentialsJson = process.env.GOOGLE_CLOUD_CREDENTIALS || process.env.GOOGLE_APPLICATION_CREDENTIALS;
   if (!credentialsJson) {
-    throw new Error('GOOGLE_CLOUD_CREDENTIALS environment variable not set');
+    throw new Error('GOOGLE_CLOUD_CREDENTIALS or GOOGLE_APPLICATION_CREDENTIALS environment variable not set');
   }
 
   const credentials = JSON.parse(credentialsJson);
@@ -34,12 +34,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     console.log('📤 Cloud upload request received');
     
     // Check for required environment variables first
-    const credentialsJson = process.env.GOOGLE_CLOUD_CREDENTIALS;
+    const credentialsJson = process.env.GOOGLE_CLOUD_CREDENTIALS || process.env.GOOGLE_APPLICATION_CREDENTIALS;
     if (!credentialsJson) {
-      console.error('❌ GOOGLE_CLOUD_CREDENTIALS environment variable not set');
+      console.error('❌ GOOGLE_CLOUD_CREDENTIALS or GOOGLE_APPLICATION_CREDENTIALS environment variable not set');
       return res.status(500).json({ 
         error: 'Google Cloud not configured', 
-        message: 'GOOGLE_CLOUD_CREDENTIALS environment variable not set' 
+        message: 'GOOGLE_CLOUD_CREDENTIALS or GOOGLE_APPLICATION_CREDENTIALS environment variable not set' 
       });
     }
     

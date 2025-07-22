@@ -7,7 +7,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   try {
     const status = {
-      googleCloudCredentials: !!process.env.GOOGLE_CLOUD_CREDENTIALS,
+      googleCloudCredentials: !!(process.env.GOOGLE_CLOUD_CREDENTIALS || process.env.GOOGLE_APPLICATION_CREDENTIALS),
       googleCloudProjectId: process.env.GOOGLE_CLOUD_PROJECT_ID || null,
       inputBucket: process.env.GOOGLE_CLOUD_INPUT_BUCKET || null,
       outputBucket: process.env.GOOGLE_CLOUD_OUTPUT_BUCKET || null,
