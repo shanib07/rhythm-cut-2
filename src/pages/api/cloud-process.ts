@@ -45,12 +45,30 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       quality
     };
     
+    // Try to authenticate if we have Google credentials
+    let headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    };
+    
+    // Check if Cloud Run requires authentication
+    try {
+      const { GoogleAuth } = await import('google-auth-library');
+      const auth = new GoogleAuth();
+      const client = await auth.getClient();
+      const token = await client.getAccessToken();
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+        console.log('🔐 Added authentication token for Cloud Run');
+      }
+    } catch (authError) {
+      console.log('⚠️ No authentication token available, trying without auth');
+    }
+    
     const response = await fetch(`${cloudRunUrl}/process`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers,
       body: JSON.stringify(requestBody),
+      signal: AbortSignal.timeout(300000), // 5 minute timeout
     });
     
     if (!response.ok) {
