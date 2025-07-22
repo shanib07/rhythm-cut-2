@@ -35,6 +35,7 @@ export default function EditPage() {
   const [exportProgress, setExportProgress] = useState(0);
   const [exportMessage, setExportMessage] = useState('');
   const [exportQuality, setExportQuality] = useState<'fast' | 'balanced' | 'high'>('balanced');
+  const [exportMethod, setExportMethod] = useState<'local' | 'cloud' | 'hybrid'>('hybrid');
   const [showExportOptions, setShowExportOptions] = useState(false);
   const [hoveredBeatIndex, setHoveredBeatIndex] = useState<number | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -439,31 +440,65 @@ export default function EditPage() {
 
       const beatMarkers = [0, ...beats.map(beat => beat.time)];
       
-      // Try hybrid export system first (much faster for supported browsers)
       let outputUrl: string;
       
-      try {
-        console.log('🚀 Attempting hybrid export...');
-        outputUrl = await hybridVideoExport(
-          videosForProcessing,
-          beatMarkers,
-          audioFileRef.current,
-          {
-            quality: exportQuality,
-            onProgress: (progress, message) => {
-              setExportProgress(Math.round(progress));
-              setExportMessage(message);
+      // Choose processing method based on user selection
+      if (exportMethod === 'hybrid' || exportMethod === 'cloud') {
+        console.log(`🚀 Using ${exportMethod} processing`);
+        setExportMessage('Starting cloud processing...');
+        
+        try {
+          // Use hybrid export system (tries cloud first, falls back to local)
+          outputUrl = await hybridVideoExport(
+            videosForProcessing,
+            beatMarkers,
+            audioFileRef.current,
+            {
+              quality: exportQuality,
+              onProgress: (progress, message) => {
+                setExportProgress(Math.round(progress));
+                setExportMessage(message || `Processing... ${Math.round(progress)}%`);
+              }
             }
+          );
+        } catch (error) {
+          console.log('🚀 Cloud processing failed, falling back to local processing');
+          if (exportMethod === 'cloud') {
+            throw error; // If user specifically chose cloud, don't fallback
           }
-        );
-        
-        toast.success(`Export completed using ${method} processing!`);
-        
-      } catch (hybridError) {
-        console.warn('Hybrid export failed, falling back to server:', hybridError);
-        
-        // Fallback to original server processing
-        setExportMessage('Falling back to server processing...');
+          // Fall back to local processing for hybrid mode
+          setExportMessage('Falling back to local processing...');
+          
+          const useQueue = exportQuality === 'high';
+          
+          if (useQueue) {
+            outputUrl = await processVideoWithBeats(
+              videosForProcessing,
+              beatMarkers,
+              `Rhythm Cut Export - ${new Date().toISOString()}`,
+              (progress) => {
+                setExportProgress(Math.round(progress * 100));
+                setExportMessage(`Processing locally... ${Math.round(progress * 100)}%`);
+              }
+            );
+          } else {
+            outputUrl = await processVideoWithBeatsDirect(
+              videosForProcessing,
+              beatMarkers,
+              audioFileRef.current,
+              `Rhythm Cut Export - ${new Date().toISOString()}`,
+              exportQuality,
+              (progress) => {
+                setExportProgress(Math.round(progress * 100));
+                setExportMessage(`Processing locally... ${Math.round(progress * 100)}%`);
+              }
+            );
+          }
+        }
+      } else {
+        // Local processing only
+        console.log('🚀 Using local processing');
+        setExportMessage('Starting local processing...');
         
         const useQueue = exportQuality === 'high';
         
@@ -1241,8 +1276,81 @@ export default function EditPage() {
               onClick={(e) => e.stopPropagation()}
             >
               <div className="mb-6">
-                <h2 className="text-xl font-bold mb-2">Choose Export Quality</h2>
-                <p className="text-gray-400 text-sm">Select the quality that best fits your needs</p>
+                <h2 className="text-xl font-bold mb-2">Export Settings</h2>
+                <p className="text-gray-400 text-sm">Choose processing method and quality</p>
+              </div>
+
+              {/* Export Method Selector */}
+              <div className="mb-6">
+                <h3 className="text-sm font-medium mb-3 text-gray-300">Processing Method</h3>
+                <div className="space-y-2">
+                  <button
+                    onClick={() => setExportMethod('hybrid')}
+                    className={`w-full p-3 rounded-lg text-left transition-colors ${
+                      exportMethod === 'hybrid' 
+                        ? 'bg-purple-500/20 border border-purple-500/50' 
+                        : 'bg-gray-800 hover:bg-gray-700'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <h4 className="font-medium text-sm">🔄 Hybrid (Recommended)</h4>
+                        <p className="text-xs text-gray-400">Cloud first, local fallback</p>
+                      </div>
+                      {exportMethod === 'hybrid' && (
+                        <div className="w-4 h-4 bg-purple-500 rounded-full flex items-center justify-center">
+                          <div className="w-2 h-2 bg-white rounded-full" />
+                        </div>
+                      )}
+                    </div>
+                  </button>
+
+                  <button
+                    onClick={() => setExportMethod('cloud')}
+                    className={`w-full p-3 rounded-lg text-left transition-colors ${
+                      exportMethod === 'cloud' 
+                        ? 'bg-blue-500/20 border border-blue-500/50' 
+                        : 'bg-gray-800 hover:bg-gray-700'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <h4 className="font-medium text-sm">☁️ Cloud Only</h4>
+                        <p className="text-xs text-gray-400">Fastest, requires internet</p>
+                      </div>
+                      {exportMethod === 'cloud' && (
+                        <div className="w-4 h-4 bg-blue-500 rounded-full flex items-center justify-center">
+                          <div className="w-2 h-2 bg-white rounded-full" />
+                        </div>
+                      )}
+                    </div>
+                  </button>
+
+                  <button
+                    onClick={() => setExportMethod('local')}
+                    className={`w-full p-3 rounded-lg text-left transition-colors ${
+                      exportMethod === 'local' 
+                        ? 'bg-green-500/20 border border-green-500/50' 
+                        : 'bg-gray-800 hover:bg-gray-700'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <h4 className="font-medium text-sm">🖥️ Local Only</h4>
+                        <p className="text-xs text-gray-400">Reliable, works offline</p>
+                      </div>
+                      {exportMethod === 'local' && (
+                        <div className="w-4 h-4 bg-green-500 rounded-full flex items-center justify-center">
+                          <div className="w-2 h-2 bg-white rounded-full" />
+                        </div>
+                      )}
+                    </div>
+                  </button>
+                </div>
+              </div>
+
+              <div className="mb-4">
+                <h3 className="text-sm font-medium mb-3 text-gray-300">Export Quality</h3>
               </div>
 
               <div className="space-y-3">
