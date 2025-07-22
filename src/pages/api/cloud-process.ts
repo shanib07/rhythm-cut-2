@@ -25,21 +25,32 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     console.log('🎬 Sending processing request to Google Cloud Run');
+    console.log('📊 Request data:', {
+      inputVideosCount: inputVideos?.length || 0,
+      beatMarkersCount: beatMarkers?.length || 0,
+      projectId,
+      quality,
+      inputVideosPreview: inputVideos?.slice(0, 2) || []
+    });
     
     const cloudRunUrl = process.env.GOOGLE_CLOUD_RUN_URL || 
       'https://rhythm-cut-processor-859380352423.us-central1.run.app';
+    
+    console.log('🌐 Sending request to:', `${cloudRunUrl}/process`);
+    
+    const requestBody = {
+      inputVideos,
+      beatMarkers,
+      projectId,
+      quality
+    };
     
     const response = await fetch(`${cloudRunUrl}/process`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({
-        inputVideos,
-        beatMarkers,
-        projectId,
-        quality
-      }),
+      body: JSON.stringify(requestBody),
     });
     
     if (!response.ok) {
