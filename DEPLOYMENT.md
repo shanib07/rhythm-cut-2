@@ -5,14 +5,29 @@
 ✅ Google Cloud infrastructure setup complete
 ✅ Railway environment variables configured  
 ✅ Google Cloud processing code created
-⏳ Deploy Cloud Run service
-⏳ Test complete pipeline
+✅ Cloud Run service deployed (rhythm-cut-processor)
+✅ Manual deployment process established
 
-## Next Steps
+## Deployment Architecture
 
-### 1. Deploy to Google Cloud Run
+This project uses a hybrid deployment:
+- **Railway**: Hosts the main Next.js application (UI, API, basic processing)
+- **Google Cloud Run**: Hosts the dedicated video processing microservice
 
-Since gcloud CLI isn't available locally, deploy through Google Cloud Console:
+## Deployment Instructions
+
+### Railway Deployment (Main App)
+
+Railway automatically deploys from the main branch using Nixpacks:
+1. Push to main branch
+2. Railway automatically builds and deploys
+3. Configuration is in `railway.json`
+
+### Google Cloud Run Deployment (Video Processor)
+
+**Important**: Do NOT use Cloud Build triggers for cloud-processor due to directory structure conflicts.
+
+Deploy manually using:
 
 1. **Go to Cloud Run**: https://console.cloud.google.com/run?project=rhythm-cut-466519
 
