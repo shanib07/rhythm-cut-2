@@ -1245,26 +1245,68 @@ export class AudioAnalyzer {
     };
   }
 
-  // Simple FFT implementation (for demonstration - in production use a library)
   private computeFFT(data: Float32Array): number[] {
     const N = data.length;
-    const output = new Array(N * 2).fill(0);
-    
-    // This is a naive DFT implementation - for production, use FFT.js or similar
-    for (let k = 0; k < N / 2; k++) {
-      let real = 0;
-      let imag = 0;
-      
-      for (let n = 0; n < N; n++) {
-        const angle = -2 * Math.PI * k * n / N;
-        real += data[n] * Math.cos(angle);
-        imag += data[n] * Math.sin(angle);
-      }
-      
-      output[k * 2] = real;
-      output[k * 2 + 1] = imag;
+    // Ensure N is a power of 2 for radix-2 FFT
+    if ((N & (N - 1)) !== 0) {
+      throw new Error('FFT data length must be a power of 2');
     }
     
+    const output = new Array(N * 2).fill(0);
+    for (let i = 0; i < N; i++) {
+      output[i * 2] = data[i];
+      output[i * 2 + 1] = 0;
+    }
+
+    // Bit-reversal permutation
+    let j = 0;
+    for (let i = 0; i < N - 1; i++) {
+      if (i < j) {
+        let tempReal = output[i * 2];
+        let tempImag = output[i * 2 + 1];
+        output[i * 2] = output[j * 2];
+        output[i * 2 + 1] = output[j * 2 + 1];
+        output[j * 2] = tempReal;
+        output[j * 2 + 1] = tempImag;
+      }
+      let m = N >> 1;
+      while (m >= 1 && j >= m) {
+        j -= m;
+        m >>= 1;
+      }
+      j += m;
+    }
+
+    // Cooley-Tukey decimation-in-time radix-2 FFT
+    for (let len = 1; len < N; len <<= 1) {
+      const step = len << 1;
+      const theta = -Math.PI / len;
+      const wPr = Math.cos(theta);
+      const wPi = Math.sin(theta);
+
+      for (let i = 0; i < N; i += step) {
+        let wr = 1;
+        let wi = 0;
+        for (let k = 0; k < len; k++) {
+          const idx1 = (i + k) * 2;
+          const idx2 = (i + k + len) * 2;
+
+          const tr = wr * output[idx2] - wi * output[idx2 + 1];
+          const ti = wr * output[idx2 + 1] + wi * output[idx2];
+
+          output[idx2] = output[idx1] - tr;
+          output[idx2 + 1] = output[idx1 + 1] - ti;
+          
+          output[idx1] += tr;
+          output[idx1 + 1] += ti;
+
+          const nextWr = wr * wPr - wi * wPi;
+          wi = wr * wPi + wi * wPr;
+          wr = nextWr;
+        }
+      }
+    }
+
     return output;
   }
 } 

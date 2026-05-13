@@ -8,6 +8,8 @@ interface VideoInput {
   id: string;
   url: string;
   duration: number;
+  width?: number;
+  height?: number;
 }
 
 export async function POST(req: NextRequest) {
@@ -80,8 +82,20 @@ export async function POST(req: NextRequest) {
 
     // Create segments
     const segments = [];
+    let lastVideoIndex = -1;
     for (let i = 0; i < beatMarkers.length - 1; i++) {
-      const videoIndex = i % inputVideos.length;
+      // Deterministic pseudo-random shuffle
+      const seed = i + beatMarkers.length + inputVideos.length;
+      let rand = Math.sin(seed * 12.9898) * 43758.5453;
+      rand = rand - Math.floor(rand);
+      
+      let videoIndex = Math.floor(rand * inputVideos.length);
+      
+      // Avoid consecutive repeating clips if possible
+      if (inputVideos.length > 1 && videoIndex === lastVideoIndex) {
+        videoIndex = (videoIndex + 1) % inputVideos.length;
+      }
+      lastVideoIndex = videoIndex;
       const duration = beatMarkers[i + 1] - beatMarkers[i];
       
       segments.push({
@@ -112,6 +126,14 @@ export async function POST(req: NextRequest) {
 
       console.log(`🎬 PROCESS: Cutting segment ${i + 1}/${segments.length}`);
 
+      // Ensure all videos match the target resolution of the first video
+      const targetWidth = inputVideos[0].width || 1280;
+      const targetHeight = inputVideos[0].height || 720;
+      
+      // Make sure width and height are even numbers (required by many codecs like libx264)
+      const w = Math.floor(targetWidth / 2) * 2;
+      const h = Math.floor(targetHeight / 2) * 2;
+
       // Simple, stable FFmpeg command
       await new Promise<void>((resolve, reject) => {
         ffmpeg(videoPath)
@@ -119,10 +141,11 @@ export async function POST(req: NextRequest) {
           .setDuration(segment.duration)
           .videoCodec('libx264')
           .audioCodec('aac')
-          .size(settings.resolution)
           .outputOptions([
+            '-vf', `scale=${w}:${h}:force_original_aspect_ratio=decrease,pad=${w}:${h}:(ow-iw)/2:(oh-ih)/2`,
             '-preset', settings.preset,
             '-crf', settings.crf,
+            '-pix_fmt', 'yuv420p',
             '-movflags', '+faststart',
             '-y'
           ])
@@ -185,7 +208,9 @@ export async function POST(req: NextRequest) {
         .outputOptions([
           '-map', '0:v:0',
           '-map', '1:a:0',
+          '-pix_fmt', 'yuv420p',
           '-shortest',
+          '-movflags', '+faststart',
           '-y'
         ])
         .output(outputPath)

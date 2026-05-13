@@ -9,6 +9,8 @@ interface VideoInput {
   id: string;
   url: string;
   duration: number;
+  width?: number;
+  height?: number;
 }
 
 // Process segments in parallel batches
@@ -16,6 +18,8 @@ async function processSegmentBatch(
   segments: any[],
   tempDir: string,
   outputId: string,
+  targetWidth: number,
+  targetHeight: number,
   batchSize: number = cpus().length
 ): Promise<string[]> {
   const segmentPaths: string[] = [];
@@ -34,15 +38,20 @@ async function processSegmentBatch(
           videoPath = path.join(process.cwd(), 'public', segment.video.url);
         }
 
+        const w = Math.floor((targetWidth || 1280) / 2) * 2;
+        const h = Math.floor((targetHeight || 720) / 2) * 2;
+
         await new Promise<void>((resolve, reject) => {
           ffmpeg(videoPath)
             .seekInput(segment.startTime)
             .inputOptions(['-ss', String(segment.startTime)])
             .duration(segment.duration)
             .outputOptions([
+              '-vf', `scale=${w}:${h}:force_original_aspect_ratio=decrease,pad=${w}:${h}:(ow-iw)/2:(oh-ih)/2`,
               '-c:v', 'libx264',
               '-preset', 'ultrafast',
               '-crf', '30',
+              '-pix_fmt', 'yuv420p',
               '-g', '48',
               '-keyint_min', '48',
               '-sc_threshold', '0',
@@ -101,8 +110,20 @@ export async function POST(req: NextRequest) {
 
     // Create segments
     const segments = [];
+    let lastVideoIndex = -1;
     for (let i = 0; i < beatMarkers.length - 1; i++) {
-      const videoIndex = i % inputVideos.length;
+      // Deterministic pseudo-random shuffle
+      const seed = i + beatMarkers.length + inputVideos.length;
+      let rand = Math.sin(seed * 12.9898) * 43758.5453;
+      rand = rand - Math.floor(rand);
+      
+      let videoIndex = Math.floor(rand * inputVideos.length);
+      
+      // Avoid consecutive repeating clips if possible
+      if (inputVideos.length > 1 && videoIndex === lastVideoIndex) {
+        videoIndex = (videoIndex + 1) % inputVideos.length;
+      }
+      lastVideoIndex = videoIndex;
       segments.push({
         video: inputVideos[videoIndex],
         startTime: 0,
@@ -119,8 +140,11 @@ export async function POST(req: NextRequest) {
     const tempDir = path.join(process.cwd(), 'tmp');
     await mkdir(tempDir, { recursive: true });
 
+    const targetWidth = inputVideos[0].width || 1280;
+    const targetHeight = inputVideos[0].height || 720;
+
     console.log('⚡ FAST-PROCESS: Processing segments in parallel...');
-    const segmentPaths = await processSegmentBatch(segments, tempDir, outputId);
+    const segmentPaths = await processSegmentBatch(segments, tempDir, outputId, targetWidth, targetHeight);
 
     // Use concat protocol for super fast concatenation (no re-encoding)
     console.log('⚡ FAST-PROCESS: Concatenating with concat protocol...');

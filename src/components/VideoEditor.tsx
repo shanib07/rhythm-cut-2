@@ -1,7 +1,7 @@
 import React, { useCallback, useState, useRef, useEffect, useMemo } from 'react';
 import { useDropzone } from 'react-dropzone';
 import { motion } from 'framer-motion';
-import { Play, Pause, Plus, Trash2, Music, Video, Loader2, Upload, Clock, Download, X } from 'lucide-react';
+import { Play, Pause, Plus, Trash2, Music, Video, Loader2, Upload, Clock, Download, X, RefreshCw } from 'lucide-react';
 import { useVideoStore } from '../stores/videoStore';
 import { generateUniqueId } from '../utils/videoUtils';
 import { VideoClip, BeatMarker, TimelineSegment } from '../types';
@@ -39,6 +39,8 @@ export const VideoEditor: React.FC = () => {
   const [isExporting, setIsExporting] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [exportUrl, setExportUrl] = useState<string | null>(null);
+  const [proxyUrl, setProxyUrl] = useState<string | null>(null);
+  const [isGeneratingProxy, setIsGeneratingProxy] = useState(false);
   const [exportProgress, setExportProgress] = useState({
     status: 'idle',
     progress: 0,
@@ -66,12 +68,27 @@ export const VideoEditor: React.FC = () => {
     return [startBeat, ...beats].sort((a, b) => a.time - b.time);
   }, [beats]);
 
+  // Invalidate proxy when clips or beats change
+  useEffect(() => {
+    setProxyUrl(null);
+  }, [clips.length, sortedBeats.length]);
+
   const videoSegments = useMemo(() => {
     if (clips.length === 0 || sortedBeats.length < 2) return [];
 
     const segments = [];
+    let lastClipIndex = -1;
     for (let i = 0; i < sortedBeats.length - 1; i++) {
-      const clipIndex = i % clips.length;
+      const seed = i + sortedBeats.length + clips.length;
+      let rand = Math.sin(seed * 12.9898) * 43758.5453;
+      rand = rand - Math.floor(rand);
+      
+      let clipIndex = Math.floor(rand * clips.length);
+      
+      if (clips.length > 1 && clipIndex === lastClipIndex) {
+        clipIndex = (clipIndex + 1) % clips.length;
+      }
+      lastClipIndex = clipIndex;
       const clip = clips[clipIndex];
       
       segments.push({
@@ -122,73 +139,30 @@ export const VideoEditor: React.FC = () => {
     };
   }, [audioUrl]);
 
-  // Handle video playback - simplified single video approach
+  // Handle video playback - synced with audio
   useEffect(() => {
     if (!videoRef.current) return;
 
     if (isPlaying) {
       videoRef.current.play().catch(console.error);
-      // Mute video to only play the audio track
       videoRef.current.muted = true;
     } else {
       videoRef.current.pause();
     }
   }, [isPlaying]);
 
-  // Handle audio time update with throttling for better performance
+  // Handle audio time update
   const handleAudioTimeUpdate = () => {
-    if (!audioRef.current || isTransitioning) return;
+    if (!audioRef.current) return;
     
-    const now = Date.now();
-    // Throttle updates to every 100ms for better performance
-    if (now - lastUpdateTime < 100) return;
-    setLastUpdateTime(now);
-
     const newTime = audioRef.current.currentTime;
     setCurrentTime(newTime);
 
-    // Find current segment with simplified logic
-    const currentSegmentIndex = videoSegments.findIndex(segment => 
-      segment && newTime >= segment.startTime && newTime < segment.endTime
-    );
-
-    if (currentSegmentIndex !== -1) {
-      const currentSegment = videoSegments[currentSegmentIndex];
-      const segmentClipIndex = clips.findIndex(clip => clip.id === currentSegment.clipId);
-      
-      // Only switch video if we're on a different clip and transition isn't too frequent
-      if (segmentClipIndex !== currentVideoIndex && segmentClipIndex >= 0) {
-        setIsTransitioning(true);
-        setCurrentVideoIndex(segmentClipIndex);
-        setCurrentClip(currentSegment.clipId);
-        
-        // Simple video switching - just change src
-        if (videoRef.current && clips[segmentClipIndex]) {
-          videoRef.current.src = clips[segmentClipIndex].url;
-          videoRef.current.muted = true;
-          
-          // Use debounced seeking for smoother performance
-          debouncedSeek(videoRef.current, 0);
-          
-          if (isPlaying) {
-            // Small delay to ensure video is ready
-            setTimeout(() => {
-              videoRef.current?.play().catch(console.error);
-            }, 100);
-          }
-        }
-        
-        // Quick transition end
-        setTimeout(() => setIsTransitioning(false), 200);
-      } else if (videoRef.current && !isTransitioning) {
-        // Update time within current video using debounced seeking
-        const relativeTime = newTime - currentSegment.startTime;
-        const timeDiff = Math.abs(videoRef.current.currentTime - relativeTime);
-        
-        // Only seek if difference is significant and not currently seeking
-        if (timeDiff > 0.3 && !videoRef.current.seeking) {
-          debouncedSeek(videoRef.current, relativeTime);
-        }
+    // If using proxy, sync video closely with audio
+    if (proxyUrl && videoRef.current && !videoRef.current.seeking) {
+      const timeDiff = Math.abs(videoRef.current.currentTime - newTime);
+      if (timeDiff > 0.5) {
+        debouncedSeek(videoRef.current, newTime);
       }
     }
   };
@@ -222,13 +196,8 @@ export const VideoEditor: React.FC = () => {
       }
     } else {
       // If starting playback, ensure we're at the right position
-      const currentSegment = videoSegments.find(seg => 
-        currentTime >= seg.startTime && currentTime < seg.endTime
-      );
-      
-      if (currentSegment && videoRef.current) {
-        const relativeTime = currentTime - currentSegment.startTime;
-        videoRef.current.currentTime = Math.max(0, relativeTime);
+      if (videoRef.current) {
+        videoRef.current.currentTime = Math.max(0, currentTime);
       }
       
       audioRef.current.play().catch(error => {
@@ -263,13 +232,18 @@ export const VideoEditor: React.FC = () => {
           // Get metadata for the video
           const metadata = await getVideoMetadata(file);
           
-          // Create optimized blob URL for preview
+          // Create optimized blob URL for preview and upload to server for proxy processing
           const previewUrl = URL.createObjectURL(file);
+          toast.info(`Uploading ${file.name}...`);
+          const serverUrl = await uploadVideoFile(file);
           
           const newClip: VideoClip = {
             id: clipId,
             file,
             url: previewUrl,
+            serverUrl,
+            width: metadata.width,
+            height: metadata.height,
             duration: metadata.duration,
             name: file.name
           };
@@ -295,6 +269,49 @@ export const VideoEditor: React.FC = () => {
     accept: { 'video/*': [] },
     multiple: true
   });
+
+  const handleGenerateProxy = async () => {
+    if (clips.length === 0 || sortedBeats.length < 2) {
+      toast.error('Add clips and at least one beat marker first');
+      return;
+    }
+    
+    setIsGeneratingProxy(true);
+    toast.info('Generating seamless proxy preview... this should be fast!');
+    
+    try {
+      const inputVideos = clips.map(clip => ({
+        id: clip.id,
+        url: clip.serverUrl || '', // MUST exist since we upload on drop now
+        duration: clip.duration,
+        width: clip.width,
+        height: clip.height
+      })).filter(v => v.url !== '');
+
+      const beatMarkers = sortedBeats.map(b => b.time);
+
+      const res = await fetch('/api/process-fast', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: 'Preview',
+          inputVideos,
+          beatMarkers
+        })
+      });
+
+      if (!res.ok) throw new Error('Failed to generate proxy');
+      const data = await res.json();
+      
+      setProxyUrl(data.outputUrl);
+      toast.success('Proxy preview generated successfully! Playback will now be seamless.');
+    } catch (e) {
+      console.error(e);
+      toast.error('Proxy generation failed. Falling back to single video preview.');
+    } finally {
+      setIsGeneratingProxy(false);
+    }
+  };
 
   const handleExport = async () => {
     console.log('🎬 EXPORT: Button clicked', { 
@@ -422,22 +439,36 @@ export const VideoEditor: React.FC = () => {
       <div className="grid grid-cols-12 gap-6">
         {/* Left panel - Video upload and preview */}
         <div className="col-span-8 space-y-4">
-          {/* Simplified single video preview */}
+          {/* Proxy Preview Video Player */}
           {currentVideoClip ? (
             <div className="relative aspect-video bg-black rounded-lg overflow-hidden">
-              <video
-                ref={videoRef}
-                src={currentVideoClip.url}
-                className="w-full h-full"
-                controls={false}
-                muted={true}
-                playsInline
-                preload="metadata"
-                poster=""
-                onLoadStart={() => console.log('Video loading...')}
-                onCanPlay={() => console.log('Video ready to play')}
-                onError={(e) => console.error('Video error:', e)}
-              />
+              {proxyUrl ? (
+                <video
+                  ref={videoRef}
+                  src={proxyUrl}
+                  className="w-full h-full"
+                  controls={false}
+                  muted={true}
+                  playsInline
+                  preload="metadata"
+                />
+              ) : (
+                <div className="flex flex-col items-center justify-center w-full h-full bg-gray-900 text-white p-8 text-center">
+                  <Video className="w-16 h-16 mb-4 text-[#06B6D4] opacity-50" />
+                  <h3 className="text-xl font-bold mb-2">Proxy Required for Seamless Preview</h3>
+                  <p className="text-gray-400 max-w-md mb-6">
+                    Dynamic switching causes lag. Generate a fast proxy video to preview your edits perfectly synced with the beat!
+                  </p>
+                  <button 
+                    onClick={handleGenerateProxy}
+                    disabled={isGeneratingProxy || clips.length === 0 || sortedBeats.length < 2}
+                    className="flex items-center gap-2 px-6 py-3 bg-[#06B6D4] text-white rounded-full font-bold hover:bg-[#0891B2] transition disabled:opacity-50"
+                  >
+                    {isGeneratingProxy ? <Loader2 className="w-5 h-5 animate-spin" /> : <RefreshCw className="w-5 h-5" />}
+                    {isGeneratingProxy ? 'Generating Proxy...' : 'Generate Seamless Preview'}
+                  </button>
+                </div>
+              )}
               
               {/* Playback controls */}
               <div className="absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-black/50 to-transparent">
@@ -445,7 +476,7 @@ export const VideoEditor: React.FC = () => {
                   <button
                     onClick={togglePlay}
                     className="p-2 rounded-full bg-[#06B6D4] hover:bg-[#0891B2] text-white"
-                    disabled={!audioUrl}
+                    disabled={!audioUrl || (!proxyUrl && isPlaying)}
                   >
                     {isPlaying ? <Pause size={20} /> : <Play size={20} />}
                   </button>
@@ -462,13 +493,6 @@ export const VideoEditor: React.FC = () => {
                   </span>
                 </div>
               </div>
-
-              {/* Loading indicator during transitions */}
-              {isTransitioning && (
-                <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
-                  <div className="w-8 h-8 border-2 border-[#06B6D4] border-t-transparent rounded-full animate-spin"></div>
-                </div>
-              )}
             </div>
           ) : (
             <div

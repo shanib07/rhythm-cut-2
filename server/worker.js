@@ -73,8 +73,20 @@ async function processVideoWithBeats(inputVideos, beatMarkers, outputPath, proje
     // Create segments based on beat markers with precise timing
     const segments = [];
     
+    let lastVideoIndex = -1;
     for (let i = 0; i < beatMarkers.length - 1; i++) {
-      const videoIndex = i % inputVideos.length; // Cycle through videos
+      // Deterministic pseudo-random shuffle
+      const seed = i + beatMarkers.length + inputVideos.length;
+      let rand = Math.sin(seed * 12.9898) * 43758.5453;
+      rand = rand - Math.floor(rand);
+      
+      let videoIndex = Math.floor(rand * inputVideos.length);
+      
+      // Avoid consecutive repeating clips if possible
+      if (inputVideos.length > 1 && videoIndex === lastVideoIndex) {
+        videoIndex = (videoIndex + 1) % inputVideos.length;
+      }
+      lastVideoIndex = videoIndex;
       const startTime = beatMarkers[i];
       const endTime = beatMarkers[i + 1];
       const duration = endTime - startTime;

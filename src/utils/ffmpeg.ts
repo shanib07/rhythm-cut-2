@@ -133,7 +133,9 @@ export const processVideoWithBeats = async (
         uploadedVideos.push({
           id: video.id,
           url: serverUrl,
-          duration: metadata.duration
+          duration: metadata.duration,
+          width: metadata.width,
+          height: metadata.height
         });
         
         // Update progress during upload phase (2-18%)
@@ -549,7 +551,9 @@ export const processVideoWithBeatsDirect = async (
       uploadedVideos.push({
         id: video.id,
         url: serverUrl,
-        duration: metadata.duration
+        duration: metadata.duration,
+        width: metadata.width,
+        height: metadata.height
       });
       
       onProgress?.(0.05 + (i + 1) / videos.length * 0.2);

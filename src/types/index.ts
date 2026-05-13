@@ -7,6 +7,9 @@ export interface VideoClip {
   id: string;
   file: File;
   url: string;
+  serverUrl?: string;
+  width?: number;
+  height?: number;
   duration: number;
   name: string;
 }
