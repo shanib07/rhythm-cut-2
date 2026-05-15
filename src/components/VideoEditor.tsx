@@ -253,7 +253,7 @@ export const VideoEditor: React.FC = () => {
           }
         }
       }
-      toast.success('Videos loaded for preview. Server processing will happen during export.');
+      toast.success('Videos loaded locally. Ready for export.');
     } catch (error) {
       console.error('Error loading videos:', error);
       toast.error('Failed to load videos');
@@ -338,7 +338,7 @@ export const VideoEditor: React.FC = () => {
 
       setExportProgress(prev => ({
         ...prev,
-        message: 'Starting server-side processing...'
+        message: 'Starting local browser processing...'
       }));
 
       // Use direct processing for faster exports (bypasses queue)
@@ -410,33 +410,15 @@ export const VideoEditor: React.FC = () => {
           {/* Proxy Preview Video Player */}
           {currentVideoClip ? (
             <div className="relative aspect-video bg-black rounded-lg overflow-hidden">
-              {proxyUrl ? (
-                <video
-                  ref={videoRef}
-                  src={proxyUrl}
-                  className="w-full h-full"
-                  controls={false}
-                  muted={true}
-                  playsInline
-                  preload="metadata"
-                />
-              ) : (
-                <div className="flex flex-col items-center justify-center w-full h-full bg-gray-900 text-white p-8 text-center">
-                  <Video className="w-16 h-16 mb-4 text-[#06B6D4] opacity-50" />
-                  <h3 className="text-xl font-bold mb-2">Proxy Required for Seamless Preview</h3>
-                  <p className="text-gray-400 max-w-md mb-6">
-                    Dynamic switching causes lag. Generate a fast proxy video to preview your edits perfectly synced with the beat!
-                  </p>
-                  <button 
-                    onClick={handleGenerateProxy}
-                    disabled={isGeneratingProxy || clips.length === 0 || sortedBeats.length < 2}
-                    className="flex items-center gap-2 px-6 py-3 bg-[#06B6D4] text-white rounded-full font-bold hover:bg-[#0891B2] transition disabled:opacity-50"
-                  >
-                    {isGeneratingProxy ? <Loader2 className="w-5 h-5 animate-spin" /> : <RefreshCw className="w-5 h-5" />}
-                    {isGeneratingProxy ? 'Generating Proxy...' : 'Generate Seamless Preview'}
-                  </button>
-                </div>
-              )}
+              <video
+                ref={videoRef}
+                src={currentVideoClip.url}
+                className="w-full h-full"
+                controls={false}
+                muted={true}
+                playsInline
+                preload="metadata"
+              />
               
               {/* Playback controls */}
               <div className="absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-black/50 to-transparent">
@@ -484,7 +466,7 @@ export const VideoEditor: React.FC = () => {
                         : 'Drag & drop videos, or click to select'}
                     </p>
                     <p className="text-sm text-gray-500">
-                      Videos will be processed on our servers for optimal performance
+                      Videos are processed locally in your browser
                     </p>
                   </>
                 )}
@@ -595,7 +577,7 @@ export const VideoEditor: React.FC = () => {
                    />
                  </div>
                 <p className="text-xs text-gray-500">
-                  Server-side processing ensures high quality and performance
+                  Processing runs in background threads — your browser stays responsive
                 </p>
               </div>
             ) : (
