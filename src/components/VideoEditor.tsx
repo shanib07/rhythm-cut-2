@@ -7,7 +7,7 @@ import { generateUniqueId } from '../utils/videoUtils';
 import { VideoClip, BeatMarker, TimelineSegment } from '../types';
 import { toast } from 'sonner';
 import { ProgressBar } from './ProgressBar';
-import { uploadVideoFile, getVideoMetadata, processVideoWithBeats, processVideoWithBeatsDirect } from '../utils/ffmpeg';
+import { getVideoMetadata, processVideoWithBeatsDirect } from '../utils/ffmpeg';
 
 export const VideoEditor: React.FC = () => {
   const {
@@ -232,16 +232,14 @@ export const VideoEditor: React.FC = () => {
           // Get metadata for the video
           const metadata = await getVideoMetadata(file);
           
-          // Create optimized blob URL for preview and upload to server for proxy processing
           const previewUrl = URL.createObjectURL(file);
-          toast.info(`Uploading ${file.name}...`);
-          const serverUrl = await uploadVideoFile(file);
+          toast.success(`${file.name} loaded locally.`);
           
           const newClip: VideoClip = {
             id: clipId,
             file,
             url: previewUrl,
-            serverUrl,
+            serverUrl: '',
             width: metadata.width,
             height: metadata.height,
             duration: metadata.duration,
@@ -279,38 +277,8 @@ export const VideoEditor: React.FC = () => {
     setIsGeneratingProxy(true);
     toast.info('Generating seamless proxy preview... this should be fast!');
     
-    try {
-      const inputVideos = clips.map(clip => ({
-        id: clip.id,
-        url: clip.serverUrl || '', // MUST exist since we upload on drop now
-        duration: clip.duration,
-        width: clip.width,
-        height: clip.height
-      })).filter(v => v.url !== '');
-
-      const beatMarkers = sortedBeats.map(b => b.time);
-
-      const res = await fetch('/api/process-fast', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: 'Preview',
-          inputVideos,
-          beatMarkers
-        })
-      });
-
-      if (!res.ok) throw new Error('Failed to generate proxy');
-      const data = await res.json();
-      
-      setProxyUrl(data.outputUrl);
-      toast.success('Proxy preview generated successfully! Playback will now be seamless.');
-    } catch (e) {
-      console.error(e);
-      toast.error('Proxy generation failed. Falling back to single video preview.');
-    } finally {
-      setIsGeneratingProxy(false);
-    }
+    toast.error('Proxy generation is currently disabled in browser-only mode. Use Export to render the final video.');
+    setIsGeneratingProxy(false);
   };
 
   const handleExport = async () => {
@@ -380,13 +348,13 @@ export const VideoEditor: React.FC = () => {
         audioFile,
         `Rhythm Cut Export - ${new Date().toISOString()}`,
         exportQuality,
-        (progress) => {
+        (progress, stage) => {
           console.log('🎬 EXPORT: Progress update received', { progress: `${(progress * 100).toFixed(1)}%` });
           setExportProgress(prev => ({
             ...prev,
             progress: Math.round(progress * 100),
             status: 'processing',
-            message: `Processing video... ${Math.round(progress * 100)}%`
+            message: stage || `Processing video... ${Math.round(progress * 100)}%`
           }));
         }
       );

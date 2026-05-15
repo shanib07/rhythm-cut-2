@@ -178,12 +178,9 @@ export default function EasyEditPage() {
         audioFile,
         'Easy Edit Video',
         'balanced', // Use balanced quality as requested
-        (progress) => {
+        (progress, stage) => {
           setProgress(30 + progress * 70); // 30-100% for video processing
-          const stage = progress < 0.3 ? 'Uploading files' : 
-                       progress < 0.9 ? 'Processing video' : 
-                       'Finalizing';
-          setProgressMessage(`${stage}... ${Math.round(progress * 100)}%`);
+          setProgressMessage(stage || `Processing... ${Math.round(progress * 100)}%`);
         }
       );
 
