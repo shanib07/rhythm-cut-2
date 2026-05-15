@@ -124,7 +124,16 @@ export class FFmpegWasmService {
   }
 
   /**
+   * Yield to the browser event loop so React can paint frames.
+   */
+  private yieldToBrowser(): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, 0));
+  }
+
+  /**
    * Internal: download and initialize FFmpeg WASM core.
+   * Uses the lighter single-threaded core (~25MB) for fast compilation.
+   * The classWorkerURL still runs FFmpeg in a background worker thread.
    */
   private async doLoad(
     onLog?: LogCallback,
@@ -136,59 +145,38 @@ export class FFmpegWasmService {
       this.ffmpeg.on('log', ({ message }) => onLog(message));
     }
 
-    const hasSharedBuffer = typeof SharedArrayBuffer !== 'undefined';
-    let coreURL: string, wasmURL: string, workerURL: string | undefined, classWorkerURL: string;
+    onDownloadProgress?.(0.05, 'Downloading engine files...');
+    await this.yieldToBrowser();
 
-    onDownloadProgress?.(0.05, 'Downloading FFmpeg scripts...');
+    // Use the single-threaded core — smaller (~25MB), compiles much faster
+    // The classWorkerURL still offloads FFmpeg to a background thread
+    const coreBase = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm';
 
-    if (hasSharedBuffer) {
-      const coreBase = 'https://unpkg.com/@ffmpeg/core-mt@0.12.6/dist/esm';
-      coreURL = await toBlobURL(`${coreBase}/ffmpeg-core.js`, 'text/javascript');
-      onDownloadProgress?.(0.10, 'Downloading FFmpeg engine (this is the big one)...');
-      
-      // The WASM file is ~31MB — track its download progress
-      wasmURL = await this.fetchWithProgress(
+    // Download all files in parallel
+    const [coreURL, wasmURL, classWorkerURL] = await Promise.all([
+      toBlobURL(`${coreBase}/ffmpeg-core.js`, 'text/javascript'),
+      this.fetchWithProgress(
         `${coreBase}/ffmpeg-core.wasm`,
         'application/wasm',
         (loaded, total) => {
           const pct = Math.round((loaded / total) * 100);
           const mb = (loaded / 1024 / 1024).toFixed(1);
           const totalMb = (total / 1024 / 1024).toFixed(1);
-          onDownloadProgress?.(0.10 + 0.75 * (loaded / total), `Downloading engine... ${mb}MB / ${totalMb}MB (${pct}%)`);
+          onDownloadProgress?.(0.05 + 0.80 * (loaded / total), `Downloading engine... ${mb}MB / ${totalMb}MB (${pct}%)`);
         }
-      );
+      ),
+      toBlobURL('https://unpkg.com/@ffmpeg/ffmpeg@0.12.15/dist/esm/worker.js', 'text/javascript'),
+    ]);
 
-      onDownloadProgress?.(0.88, 'Downloading worker thread...');
-      workerURL = await toBlobURL(`${coreBase}/ffmpeg-core.worker.js`, 'text/javascript');
-    } else {
-      const coreBase = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm';
-      coreURL = await toBlobURL(`${coreBase}/ffmpeg-core.js`, 'text/javascript');
-      onDownloadProgress?.(0.10, 'Downloading FFmpeg engine...');
-      
-      wasmURL = await this.fetchWithProgress(
-        `${coreBase}/ffmpeg-core.wasm`,
-        'application/wasm',
-        (loaded, total) => {
-          const pct = Math.round((loaded / total) * 100);
-          const mb = (loaded / 1024 / 1024).toFixed(1);
-          const totalMb = (total / 1024 / 1024).toFixed(1);
-          onDownloadProgress?.(0.10 + 0.80 * (loaded / total), `Downloading engine... ${mb}MB / ${totalMb}MB (${pct}%)`);
-        }
-      );
-    }
+    // Yield before WASM compilation
+    onDownloadProgress?.(0.90, 'Compiling video engine...');
+    await this.yieldToBrowser();
 
-    onDownloadProgress?.(0.92, 'Preparing FFmpeg worker...');
-
-    // Load the @ffmpeg/ffmpeg internal worker as a blob URL (fixes COEP)
-    classWorkerURL = await toBlobURL(
-      'https://unpkg.com/@ffmpeg/ffmpeg@0.12.15/dist/esm/worker.js',
-      'text/javascript'
-    );
-
-    onDownloadProgress?.(0.95, 'Initializing FFmpeg...');
-    await this.ffmpeg.load({ coreURL, wasmURL, workerURL, classWorkerURL });
+    await this.ffmpeg.load({ coreURL, wasmURL, classWorkerURL });
     this.isLoaded = true;
+
     onDownloadProgress?.(1.0, 'Engine ready!');
+    await this.yieldToBrowser();
   }
 
   /**
