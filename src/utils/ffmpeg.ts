@@ -1,4 +1,4 @@
-import { ffmpegWasmService } from '../services/FFmpegWasmService';
+import { FFmpegWasmService } from '../services/FFmpegWasmService';
 
 // Browser-side video processing utilities
 export interface VideoMetadata {
@@ -65,7 +65,7 @@ export async function processVideo(): Promise<string> { throw new Error('Not imp
 export async function generateThumbnail(): Promise<string> { throw new Error('Not implemented for WASM'); }
 
 export async function cleanupFFmpeg(): Promise<void> {
-  await ffmpegWasmService.terminate();
+  await FFmpegWasmService.getInstance().terminate();
 }
 
 export function getMemoryInfo(): { total: number; free: number } {
@@ -110,7 +110,7 @@ export const processVideoWithBeatsDirect = async (
       });
     }
 
-    const outputUrl = await ffmpegWasmService.processVideoWithBeatsBrowser(
+    const outputUrl = await FFmpegWasmService.getInstance().processVideoWithBeatsBrowser(
       videosWithMetadata,
       beatMarkers,
       audioFile,

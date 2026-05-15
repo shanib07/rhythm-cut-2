@@ -5,7 +5,7 @@ import { v4 as uuidv4 } from 'uuid';
 export type LogCallback = (msg: string) => void;
 export type ProgressCallback = (progress: number) => void;
 
-class FFmpegWasmService {
+export class FFmpegWasmService {
   private static instance: FFmpegWasmService;
   private ffmpeg: FFmpeg;
   private isLoaded: boolean = false;
@@ -266,4 +266,4 @@ class FFmpegWasmService {
   }
 }
 
-export const ffmpegWasmService = FFmpegWasmService.getInstance();
+
