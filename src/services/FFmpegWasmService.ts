@@ -75,8 +75,12 @@ class FFmpegWasmService {
   }
 
   public async writeFile(fileName: string, fileData: File | Blob | Uint8Array): Promise<void> {
-    const data = await fetchFile(fileData);
-    await this.ffmpeg.writeFile(fileName, data);
+    if (fileData instanceof Uint8Array) {
+      await this.ffmpeg.writeFile(fileName, fileData);
+    } else {
+      const data = await fetchFile(fileData);
+      await this.ffmpeg.writeFile(fileName, data);
+    }
   }
 
   public async readFile(fileName: string): Promise<Uint8Array> {
