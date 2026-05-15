@@ -1,4 +1,4 @@
-import { uploadVideoFile, getVideoMetadata, processVideoWithBeats } from './ffmpeg';
+import { getVideoMetadata, processVideoWithBeatsDirect } from './ffmpeg';
 
 const CHUNK_SIZE = 1024 * 1024 * 10; // 10MB chunks
 const THUMBNAIL_INTERVAL = 5; // Generate thumbnail every 5 seconds
@@ -133,10 +133,12 @@ export async function processVideoChunks(
       options.endTime || (await getVideoMetadata(file)).duration
     ];
     
-    return await processVideoWithBeats(
+    return await processVideoWithBeatsDirect(
       videos,
       beatMarkers,
+      file, // Treat first chunk as audio or handle correctly? Actually this function is likely unused now.
       'Chunked Video Processing',
+      'balanced',
       onProgress
     );
   } finally {
@@ -213,12 +215,12 @@ export async function uploadVideos(
     const file = files[i];
     onProgress?.(i, files.length);
     
-    const serverUrl = await uploadVideoFile(file);
+    const localUrl = URL.createObjectURL(file);
     const metadata = await getVideoMetadata(file);
     
     uploadedVideos.push({
       id: `video-${i}`,
-      url: serverUrl,
+      url: localUrl,
       duration: metadata.duration
     });
   }

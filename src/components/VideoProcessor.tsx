@@ -3,7 +3,7 @@ import { useDropzone } from 'react-dropzone';
 import { toast } from 'sonner';
 import { useVideoStore } from '../stores/videoStore';
 import { ProcessingModal } from './ProcessingModal';
-import { uploadVideoFile, getVideoMetadata } from '../utils/ffmpeg';
+import { getVideoMetadata } from '../utils/ffmpeg';
 import { generateThumbnails, isVideoSupported } from '../utils/videoOptimization';
 
 interface VideoProcessorProps {
@@ -64,13 +64,7 @@ export const VideoProcessor: React.FC<VideoProcessorProps> = ({ onProcessingComp
       
       const metadata = await getVideoMetadata(file);
       
-      // Upload video to server
-      setProcessingProgress({
-        value: 0.3,
-        message: 'Uploading video to server...'
-      });
-      
-      const serverUrl = await uploadVideoFile(file);
+      const localUrl = URL.createObjectURL(file);
       
       // Generate thumbnails using server-side processing
       setProcessingProgress({
@@ -86,10 +80,10 @@ export const VideoProcessor: React.FC<VideoProcessorProps> = ({ onProcessingComp
         message: 'Finalizing...'
       });
       
-      // Add to store with server URL
+      // Add to store with local URL
       addVideo({
         id: Date.now().toString(),
-        url: serverUrl, // Use server URL instead of blob URL
+        url: localUrl,
         thumbnails: thumbnails.map(t => ({ time: t.time, url: t.url })),
         duration: metadata.duration
       });
@@ -99,7 +93,7 @@ export const VideoProcessor: React.FC<VideoProcessorProps> = ({ onProcessingComp
         message: 'Video processed successfully!'
       });
       
-      toast.success('Video processed and uploaded successfully!');
+      toast.success('Video processed successfully!');
       onProcessingComplete();
     } catch (error) {
       console.error('Video processing error:', error);
