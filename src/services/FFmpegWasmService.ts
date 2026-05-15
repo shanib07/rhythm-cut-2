@@ -251,7 +251,7 @@ class FFmpegWasmService {
       await this.deleteFile(videoOnlyName);
       await this.deleteFile(finalOutputName);
 
-      const blob = new Blob([outputData.buffer], { type: 'video/mp4' });
+      const blob = new Blob([outputData], { type: 'video/mp4' });
       const url = URL.createObjectURL(blob);
 
       onProgress?.(1.0, 'Complete!');
