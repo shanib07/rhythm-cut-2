@@ -38,12 +38,98 @@ export class FFmpegWasmService {
   }
 
   /**
-   * Load FFmpeg with all required blob URLs including the critical classWorkerURL.
+   * Preload FFmpeg in the background (fire-and-forget).
+   * Safe to call multiple times — only loads once.
+   */
+  public preload(): void {
+    if (this.isLoaded || this.loadPromise) return;
+    this.loadPromise = this.doLoad().catch(err => {
+      console.warn('FFmpeg preload failed (will retry on export):', err);
+      this.loadPromise = null;
+    });
+  }
+
+  /**
+   * Load FFmpeg with real-time download progress. Use this for the loading screen.
+   * Resolves when FFmpeg is fully ready.
+   */
+  public async loadWithProgress(
+    onProgress: (progress: number, stage: string) => void
+  ): Promise<void> {
+    if (this.isLoaded) return;
+    if (this.loadPromise) {
+      onProgress(0.5, 'Waiting for download to finish...');
+      await this.loadPromise;
+      return;
+    }
+    this.loadPromise = this.doLoad(undefined, onProgress);
+    await this.loadPromise;
+  }
+
+  public getIsLoaded(): boolean {
+    return this.isLoaded;
+  }
+
+  private loadPromise: Promise<void> | null = null;
+
+  /**
+   * Ensure FFmpeg is loaded before processing.
    */
   private async ensureLoaded(onProgress?: ProgressCallback, onLog?: LogCallback): Promise<FFmpeg> {
     if (this.ffmpeg && this.isLoaded) return this.ffmpeg;
 
-    onProgress?.(0.02, 'Loading FFmpeg engine...');
+    if (!this.loadPromise) {
+      onProgress?.(0.02, 'Loading FFmpeg engine...');
+      this.loadPromise = this.doLoad(onLog);
+    } else {
+      onProgress?.(0.02, 'Waiting for FFmpeg engine...');
+    }
+
+    await this.loadPromise;
+    onProgress?.(0.08, 'FFmpeg engine ready.');
+    return this.ffmpeg!;
+  }
+
+  /**
+   * Fetch a URL with download progress tracking.
+   * Returns a Blob URL (same result as toBlobURL but with progress).
+   */
+  private async fetchWithProgress(
+    url: string,
+    mimeType: string,
+    onProgress?: (loaded: number, total: number) => void
+  ): Promise<string> {
+    const response = await fetch(url);
+    const contentLength = Number(response.headers.get('content-length') || 0);
+    
+    if (!response.body || !contentLength) {
+      // Fallback to toBlobURL if streaming isn't supported
+      return toBlobURL(url, mimeType);
+    }
+
+    const reader = response.body.getReader();
+    const chunks: Uint8Array[] = [];
+    let loaded = 0;
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+      loaded += value.length;
+      onProgress?.(loaded, contentLength);
+    }
+
+    const blob = new Blob(chunks, { type: mimeType });
+    return URL.createObjectURL(blob);
+  }
+
+  /**
+   * Internal: download and initialize FFmpeg WASM core.
+   */
+  private async doLoad(
+    onLog?: LogCallback,
+    onDownloadProgress?: (progress: number, stage: string) => void
+  ): Promise<void> {
     this.ffmpeg = new FFmpeg();
 
     if (onLog) {
@@ -53,30 +139,56 @@ export class FFmpegWasmService {
     const hasSharedBuffer = typeof SharedArrayBuffer !== 'undefined';
     let coreURL: string, wasmURL: string, workerURL: string | undefined, classWorkerURL: string;
 
+    onDownloadProgress?.(0.05, 'Downloading FFmpeg scripts...');
+
     if (hasSharedBuffer) {
-      // Multi-threaded core — FFmpeg runs in background threads, UI stays responsive
       const coreBase = 'https://unpkg.com/@ffmpeg/core-mt@0.12.6/dist/esm';
-      coreURL   = await toBlobURL(`${coreBase}/ffmpeg-core.js`,        'text/javascript');
-      wasmURL   = await toBlobURL(`${coreBase}/ffmpeg-core.wasm`,      'application/wasm');
+      coreURL = await toBlobURL(`${coreBase}/ffmpeg-core.js`, 'text/javascript');
+      onDownloadProgress?.(0.10, 'Downloading FFmpeg engine (this is the big one)...');
+      
+      // The WASM file is ~31MB — track its download progress
+      wasmURL = await this.fetchWithProgress(
+        `${coreBase}/ffmpeg-core.wasm`,
+        'application/wasm',
+        (loaded, total) => {
+          const pct = Math.round((loaded / total) * 100);
+          const mb = (loaded / 1024 / 1024).toFixed(1);
+          const totalMb = (total / 1024 / 1024).toFixed(1);
+          onDownloadProgress?.(0.10 + 0.75 * (loaded / total), `Downloading engine... ${mb}MB / ${totalMb}MB (${pct}%)`);
+        }
+      );
+
+      onDownloadProgress?.(0.88, 'Downloading worker thread...');
       workerURL = await toBlobURL(`${coreBase}/ffmpeg-core.worker.js`, 'text/javascript');
     } else {
-      // Fallback single-threaded core
       const coreBase = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm';
-      coreURL = await toBlobURL(`${coreBase}/ffmpeg-core.js`,   'text/javascript');
-      wasmURL = await toBlobURL(`${coreBase}/ffmpeg-core.wasm`, 'application/wasm');
+      coreURL = await toBlobURL(`${coreBase}/ffmpeg-core.js`, 'text/javascript');
+      onDownloadProgress?.(0.10, 'Downloading FFmpeg engine...');
+      
+      wasmURL = await this.fetchWithProgress(
+        `${coreBase}/ffmpeg-core.wasm`,
+        'application/wasm',
+        (loaded, total) => {
+          const pct = Math.round((loaded / total) * 100);
+          const mb = (loaded / 1024 / 1024).toFixed(1);
+          const totalMb = (total / 1024 / 1024).toFixed(1);
+          onDownloadProgress?.(0.10 + 0.80 * (loaded / total), `Downloading engine... ${mb}MB / ${totalMb}MB (${pct}%)`);
+        }
+      );
     }
 
-    // THIS is the critical fix: load the @ffmpeg/ffmpeg internal worker as a blob URL
-    // Without this, it tries to load from unpkg.com cross-origin, which COEP blocks
+    onDownloadProgress?.(0.92, 'Preparing FFmpeg worker...');
+
+    // Load the @ffmpeg/ffmpeg internal worker as a blob URL (fixes COEP)
     classWorkerURL = await toBlobURL(
       'https://unpkg.com/@ffmpeg/ffmpeg@0.12.15/dist/esm/worker.js',
       'text/javascript'
     );
 
+    onDownloadProgress?.(0.95, 'Initializing FFmpeg...');
     await this.ffmpeg.load({ coreURL, wasmURL, workerURL, classWorkerURL });
     this.isLoaded = true;
-    onProgress?.(0.08, 'FFmpeg engine ready.');
-    return this.ffmpeg;
+    onDownloadProgress?.(1.0, 'Engine ready!');
   }
 
   /**

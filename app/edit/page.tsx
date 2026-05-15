@@ -7,6 +7,7 @@ import { Music, Video, Play, Pause, AlertCircle, Volume2, Activity, Clock, Timer
 import { AudioAnalyzer } from '@/src/services/AudioAnalyzer';
 import { WaveformVisualizer } from '@/src/components/WaveformVisualizer';
 import { VideoEditor } from '@/src/components/VideoEditor';
+import { FFmpegLoader } from '@/src/components/FFmpegLoader';
 import { toast } from 'sonner';
 import { motion } from 'framer-motion';
 import { useVideoStore } from '@/src/stores/videoStore';
@@ -242,6 +243,7 @@ export default function EditPage() {
   };
 
   return (
+    <FFmpegLoader>
     <div className="min-h-screen bg-[#0F172A] p-8 text-gray-100">
       <header className="mb-8">
         <h1 className="text-3xl font-bold flex items-center gap-2 text-white">
@@ -392,5 +394,6 @@ export default function EditPage() {
         <VideoEditor />
       </div>
     </div>
+    </FFmpegLoader>
   );
 } 

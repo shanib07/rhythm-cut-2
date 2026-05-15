@@ -5,6 +5,7 @@ import { FileAudio, Video, Loader2, Download, Music, Activity, CheckCircle, Uplo
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
 import { AudioAnalyzer } from '@/src/services/AudioAnalyzer';
+import { FFmpegLoader } from '@/src/components/FFmpegLoader';
 import { processVideoWithBeatsDirect } from '@/src/utils/ffmpeg';
 import { generateUniqueId } from '@/src/utils/videoUtils';
 
@@ -223,6 +224,7 @@ export default function EasyEditPage() {
   };
 
   return (
+    <FFmpegLoader>
     <div className="min-h-screen bg-gradient-to-br from-[#0F172A] via-[#1E293B] to-[#0F172A] p-8">
       <div className="max-w-4xl mx-auto">
         {/* Header */}
@@ -510,5 +512,6 @@ export default function EasyEditPage() {
         </motion.div>
       </div>
     </div>
+    </FFmpegLoader>
   );
 } 
